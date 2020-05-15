@@ -15,7 +15,7 @@ class Get_New_Gps():
         # 地球半径
         self.R = 6371 * 1000
         pass
-    def get_new_lng_angle(self, lng1, lat1, dist=500, angle=30): #给定经度、纬度、距离、航向，得到纬度、经度
+    def get_new_lng_angle(self, lat1,lng1,  dist=5000, angle=30): #给定经度、纬度、距离、航向，得到纬度、经度
         """
 
         :param lng1:116.55272514141352
@@ -66,7 +66,7 @@ def resolveJson(path):
 
 #画图
 def draw(list = [],truth = []):
-    map = Basemap(llcrnrlon = -10, llcrnrlat = 58, urcrnrlon = 10, urcrnrlat = 65,
+    map = Basemap(llcrnrlon = -180, llcrnrlat = 50, urcrnrlon = -150, urcrnrlat = 55,
                 resolution = 'i', projection = 'tmerc', lat_0 = 61, lon_0 = 2)
     map.drawmapboundary(fill_color='aqua')
     map.fillcontinents(color='coral', lake_color='aqua')
@@ -74,13 +74,13 @@ def draw(list = [],truth = []):
     # x是经度，y是纬度
     for point in list:
         # print(point.lon,point.lat)
-        x, y = map(float(point[4]),float(point[3]))
-        map.plot(x, y, marker='.', color='green')
+        x, y = map(float(point[3]),float(point[2]))
+        map.plot(y, x, marker='.', color='green')#纬度放在前面，经度放在后面
     print("预测点画图成功")
     for point in truth:
         # print(point.lon,point.lat)
         x, y = map(float(point[4]),float(point[3]))
-        map.plot(x, y, marker='.', color='lime')
+        map.plot(y, x, marker='.', color='lime')
     print("真实点画图成功")
     plt.show()
     plt.savefig('test.png')
@@ -90,7 +90,7 @@ def draw(list = [],truth = []):
 def getDistance(point_now=[],list = [[]]):
     li=[]
     for point in list:
-        if geodesic((point_now[3],point_now[4]), (point[3],point[4])).m < 500:#计算两个坐标直线距离
+        if geodesic((point_now[2],point_now[3]), (point[3],point[4])).m < 5000:#计算两个坐标直线距离
             li.append(point)
     return li
 
@@ -100,37 +100,35 @@ def getPredictionFirst(point_now=[],list = [[]]):
     sumheading = 0
     sumspeed = 0
     for num in range(len(list)):
-        if (abs(list[num][6]-point_now[6])<45)or(abs(list[num][6]-point_now[6])>270): #寻找满足航向要求的点
+        if (abs(list[num][7]-point_now[5])<45)or(abs(list[num][7]-point_now[5])>315): #寻找满足航向要求的点
             count+=1
-            sumheading+=list[num][6]
+            sumheading+=list[num][7]
             sumspeed+=list[num][5]
-    print("预测一个点")
-    avghead = float(sumheading/count)
-    avgspeed = float(sumspeed/count)
+    print("count={0}".format(count))
+    if(count!=0):
+        avghead = float(sumheading/count)
+        avgspeed = float(sumspeed/count)
+    else:
+        avghead = point_now[5]
+        avgspeed = point_now[4]
     # timeArray = time.strptime(point_now[2], "%Y-%m-%d %H:%M:%S")
-    timeStamp = time.mktime(point_now[2].timetuple())
-    timeStampnew = timeStamp + int(1000*500/avgspeed)
+    timeStamp = time.mktime(point_now[1].timetuple())
+    timeStampnew = timeStamp + int(5000/(avgspeed*0.51444))
     timeArray = time.localtime(timeStampnew)
-    nexttime = time.strftime("%Y-%m-%d %H:%M:%S", timeArray)
-    lat_new,lon_new = functions.get_new_lng_angle(point_now[4],point_now[3],500,avghead)
-    return avghead,avgspeed,nexttime,lat_new,lon_new
+    nexttime_old = time.strftime("%Y-%m-%d %H:%M:%S", timeArray)
+    nexttime = datetime.datetime.strptime(nexttime_old,"%Y-%m-%d %H:%M:%S")
+    lat_new,lon_new = functions.get_new_lng_angle(point_now[2],point_now[3],5000,avghead)
+    return nexttime,round(lat_new,6),round(lon_new,6),round(avgspeed,6),round(avghead,6)
 
 functions = Get_New_Gps()
 
 def output():
     db = MySQLdb.connect("localhost", "root", "123456", "ais", charset='utf8')
-
     # 使用cursor()方法获取操作游标
     cursor = db.cursor()
-
     # SQL 查询语句
-    sql_area = "SELECT * FROM points WHERE lat BETWEEN 58 AND 65 AND lon BETWEEN -10 AND 10;"
-    sql_truth = "SELECT * FROM points WHERE lat BETWEEN 58 AND 65 AND lon BETWEEN -10 AND 10 AND MMSI = '252576';"
+    sql_truth = "SELECT * FROM aispoints WHERE lat BETWEEN 50 AND 55 AND lon BETWEEN -180 AND -150 AND MMSI = '352844000';"
     try:
-        # 执行SQL语句
-        cursor.execute(sql_area)
-        # 获取区域内所有记录列表
-        results_area = cursor.fetchall()
         # 执行SQL语句
         cursor.execute(sql_truth)
         # 获取某一条船只记录列表
@@ -138,17 +136,30 @@ def output():
     except:
         print
         "Error: unable to fecth data"
-    # 关闭数据库连接
-    db.close()
+    for i in range(0,50):
+        print(results_truth[i])
     prediction = [[]]
-    prediction[0] = results_truth[0]
+    prediction[0] = [results_truth[0][1],results_truth[0][2],results_truth[0][3],results_truth[0][4],results_truth[0][5],results_truth[0][7]]
     print(prediction[0])
     for i in range(0,51):
+        sql_area = "SELECT * FROM aispoints WHERE lat BETWEEN {0} AND {1} AND lon BETWEEN {2} AND {3};".format(float(prediction[i][2])-1,float(prediction[i][2])+1,float(prediction[i][3])-1,float(prediction[i][3])+1)
+        try:
+            # 执行SQL语句
+            cursor.execute(sql_area)
+            # 获取区域内所有记录列表
+            results_area = cursor.fetchall()
+            # 执行SQL语句
+        except:
+            print
+            "Error: unable to fecth data"
         list1 = getDistance(prediction[i],results_area)
-        prediction_head,prediction_speed,prediction_time,prediction_lat,prediction_lon = getPredictionFirst(prediction[i],list1)
-        prediction.append([prediction[0][1],prediction_time,prediction_head,prediction_speed,prediction_lat,prediction_lon])
-        print([prediction[0][1],prediction_time,prediction_head,prediction_speed,prediction_lat,prediction_lon])
-    draw(results_truth,prediction)
+        prediction_time,prediction_lat,prediction_lon,prediction_speed,prediction_head = getPredictionFirst(prediction[i],list1)
+        prediction.append([prediction[0][0],prediction_time,prediction_lat,prediction_lon,prediction_speed,prediction_head])
+        print("预测第{0}个点".format(i+1))
+        print(prediction[i+1])
+    # 关闭数据库连接
+    db.close()
+    draw(prediction,results_truth)
     # for x in result:
     #         print(x.lon,x.lat,x.speed,x.heading,x.time,x.ID)
 output()
