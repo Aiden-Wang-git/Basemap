@@ -15,7 +15,7 @@ class Get_New_Gps():
         # 地球半径
         self.R = 6371 * 1000
         pass
-    def get_new_lng_angle(self, lat1,lng1,  dist=5000, angle=30): #给定经度、纬度、距离、航向，得到纬度、经度
+    def get_new_lng_angle(self, lat1,lng1,  dist=1000, angle=30): #给定经度、纬度、距离、航向，得到纬度、经度
         """
 
         :param lng1:116.55272514141352
@@ -25,7 +25,7 @@ class Get_New_Gps():
         :return:（0.0091871843081617/pi + 116.498079 0.0122339171779312/pi + 39.752304）
         """
         lat2 = 180 * dist * sin(radians(angle+90)) / (self.R * pi) + lat1
-        lng2 = 180 * dist * cos(radians(angle+90)) / (self.R * pi * cos(radians(lat1))) + lng1
+        lng2 = -180 * dist * cos(radians(angle+90)) / (self.R * pi * cos(radians(lat1))) + lng1
         return (lat2,lng2 )
 
 
@@ -66,8 +66,8 @@ def resolveJson(path):
 
 #画图
 def draw(list = [],truth = []):
-    map = Basemap(llcrnrlon = -180, llcrnrlat = 50, urcrnrlon = -150, urcrnrlat = 55,
-                resolution = 'i', projection = 'tmerc', lat_0 = 61, lon_0 = 2)
+    map = Basemap(llcrnrlon = -180, llcrnrlat = 51, urcrnrlon = -174, urcrnrlat = 55,
+                resolution = 'f', projection = 'tmerc', lat_0 = 61, lon_0 = 2)
     map.drawmapboundary(fill_color='aqua')
     map.fillcontinents(color='coral', lake_color='aqua')
     map.drawcoastlines()
@@ -75,22 +75,28 @@ def draw(list = [],truth = []):
     for point in list:
         # print(point.lon,point.lat)
         x, y = map(float(point[3]),float(point[2]))
-        map.plot(y, x, marker='.', color='green')#纬度放在前面，经度放在后面
+        print(point)
+        map.plot(y, x, marker='.', color='green', markersize=1)#纬度放在前面，经度放在后面,绿色代表预测点
     print("预测点画图成功")
+    index = 0
     for point in truth:
+        index+=1
+        if index>150:
+            break
+        print(point)
         # print(point.lon,point.lat)
         x, y = map(float(point[4]),float(point[3]))
-        map.plot(y, x, marker='.', color='lime')
+        map.plot(y, x, marker='.', color='m', markersize=1)#真实点用紫色标志
     print("真实点画图成功")
+    plt.savefig("test{0}.png".format(filename))
     plt.show()
-    plt.savefig('test.png')
 
 
 #寻找半径内所有点
 def getDistance(point_now=[],list = [[]]):
     li=[]
     for point in list:
-        if geodesic((point_now[2],point_now[3]), (point[3],point[4])).m < 5000:#计算两个坐标直线距离
+        if geodesic((point_now[2],point_now[3]), (point[3],point[4])).m < 2000:#计算两个坐标直线距离
             li.append(point)
     return li
 
@@ -113,21 +119,23 @@ def getPredictionFirst(point_now=[],list = [[]]):
         avgspeed = point_now[4]
     # timeArray = time.strptime(point_now[2], "%Y-%m-%d %H:%M:%S")
     timeStamp = time.mktime(point_now[1].timetuple())
-    timeStampnew = timeStamp + int(5000/(avgspeed*0.51444))
+    timeStampnew = timeStamp + int(1000/(avgspeed*0.51444))
     timeArray = time.localtime(timeStampnew)
     nexttime_old = time.strftime("%Y-%m-%d %H:%M:%S", timeArray)
     nexttime = datetime.datetime.strptime(nexttime_old,"%Y-%m-%d %H:%M:%S")
-    lat_new,lon_new = functions.get_new_lng_angle(point_now[2],point_now[3],5000,avghead)
+    lat_new,lon_new = functions.get_new_lng_angle(point_now[2],point_now[3],1000,avghead)
     return nexttime,round(lat_new,6),round(lon_new,6),round(avgspeed,6),round(avghead,6)
 
 functions = Get_New_Gps()
+# 船只ID
+filename = "338626000"
 
 def output():
     db = MySQLdb.connect("localhost", "root", "123456", "ais", charset='utf8')
     # 使用cursor()方法获取操作游标
     cursor = db.cursor()
     # SQL 查询语句
-    sql_truth = "SELECT * FROM aispoints WHERE lat BETWEEN 50 AND 55 AND lon BETWEEN -180 AND -150 AND MMSI = '352844000';"
+    sql_truth = "SELECT * FROM aispoints WHERE lat BETWEEN 50 AND 55 AND lon BETWEEN -180 AND -150 AND MMSI = '{0}' order by BaseDateTime ;".format(filename)
     try:
         # 执行SQL语句
         cursor.execute(sql_truth)
@@ -136,13 +144,11 @@ def output():
     except:
         print
         "Error: unable to fecth data"
-    for i in range(0,50):
-        print(results_truth[i])
     prediction = [[]]
-    prediction[0] = [results_truth[0][1],results_truth[0][2],results_truth[0][3],results_truth[0][4],results_truth[0][5],results_truth[0][7]]
+    prediction[0] = [results_truth[50][1],results_truth[50][2],results_truth[50][3],results_truth[50][4],results_truth[50][5],results_truth[50][7]]
     print(prediction[0])
-    for i in range(0,51):
-        sql_area = "SELECT * FROM aispoints WHERE lat BETWEEN {0} AND {1} AND lon BETWEEN {2} AND {3};".format(float(prediction[i][2])-1,float(prediction[i][2])+1,float(prediction[i][3])-1,float(prediction[i][3])+1)
+    for i in range(0,100):
+        sql_area = "SELECT * FROM aispoints WHERE lat BETWEEN {0} AND {1} AND lon BETWEEN {2} AND {3} AND MMSI<>{4};".format(float(prediction[i][2])-0.5,float(prediction[i][2])+0.5,float(prediction[i][3])-0.5,float(prediction[i][3])+0.5,filename)
         try:
             # 执行SQL语句
             cursor.execute(sql_area)
@@ -156,7 +162,6 @@ def output():
         prediction_time,prediction_lat,prediction_lon,prediction_speed,prediction_head = getPredictionFirst(prediction[i],list1)
         prediction.append([prediction[0][0],prediction_time,prediction_lat,prediction_lon,prediction_speed,prediction_head])
         print("预测第{0}个点".format(i+1))
-        print(prediction[i+1])
     # 关闭数据库连接
     db.close()
     draw(prediction,results_truth)
