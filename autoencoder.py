@@ -17,6 +17,7 @@ class Get_New_Gps():
         pass
     def get_new_lng_angle(self, lat1,lng1,  dist=1000, angle=30): #给定经度、纬度、距离、航向，得到纬度、经度
         """
+
         :param lng1:116.55272514141352
         :param lat1:30.28708
         :param dist:指定距离
@@ -84,6 +85,21 @@ def draw(list = [],truth = []):
             break
         print(point)
         # print(point.lon,point.lat)
+        x, y = map(float(point[4]),float(point[3]))
+        map.plot(y, x, marker='.', color='m', markersize=1)#真实点用紫色标志
+    print("真实点画图成功")
+    plt.savefig("test{0}.png".format(filename))
+    plt.show()
+
+def draw1(truth = []):
+    map = Basemap(llcrnrlon = -180, llcrnrlat = 51, urcrnrlon = -174, urcrnrlat = 55,
+                resolution = 'f', projection = 'tmerc', lat_0 = 61, lon_0 = 2)
+    map.drawmapboundary(fill_color='aqua')
+    map.fillcontinents(color='coral', lake_color='aqua')
+    map.drawcoastlines()
+    # x是经度，y是纬度
+    index = 0
+    for point in truth:
         x, y = map(float(point[4]),float(point[3]))
         map.plot(y, x, marker='.', color='m', markersize=1)#真实点用紫色标志
     print("真实点画图成功")
@@ -166,4 +182,20 @@ def output():
     draw(prediction,results_truth)
     # for x in result:
     #         print(x.lon,x.lat,x.speed,x.heading,x.time,x.ID)
-output()
+
+def test():
+    db = MySQLdb.connect("localhost", "root", "123456", "ais", charset='utf8')
+    # 使用cursor()方法获取操作游标
+    cursor = db.cursor()
+    # SQL 查询语句
+    sql_truth = "SELECT * FROM aispoints WHERE lat BETWEEN 50 AND 55 AND lon BETWEEN -180 AND -150 order by BaseDateTime ;"
+    try:
+        # 执行SQL语句
+        cursor.execute(sql_truth)
+        # 获取某一条船只记录列表
+        results_truth = cursor.fetchall()
+    except:
+        print
+        "Error: unable to fecth data"
+    draw1(results_truth)
+test()
