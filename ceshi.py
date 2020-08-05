@@ -1,21 +1,16 @@
-# -*-coding:utf-8 -*-
-import numpy as np
-from scipy import interpolate
-import pylab as pl
+import matplotlib.pyplot as plt
+from sklearn.datasets.samples_generator import make_blobs
+from sklearn.mixture import GaussianMixture
 
-x=np.linspace(0,10,11)
-#x=[  0.   1.   2.   3.   4.   5.   6.   7.   8.   9.  10.]
-y=np.sin(x)
-xnew=np.linspace(0,10,101)
-pl.plot(x,y,"ro")
+# X为样本特征，Y为样本簇类别， 共1000个样本，每个样本2个特征，共4个簇，簇中心在[-1,-1], [0,0],[1,1], [2,2]
+X, y = make_blobs(n_samples=1000, n_features=2, centers=[[-1,-1], [0,0], [1,1], [2,2]], cluster_std=[0.4, 0.3, 0.4, 0.3],
+                  random_state = 0)
 
-for kind in ["nearest","zero","slinear","quadratic","cubic"]:#插值方式
-    #"nearest","zero"为阶梯插值
-    #slinear 线性插值
-    #"quadratic","cubic" 为2阶、3阶B样条曲线插值
-    f=interpolate.interp1d(x,y,kind=kind)
-    # ‘slinear’, ‘quadratic’ and ‘cubic’ refer to a spline interpolation of first, second or third order)
-    ynew=f(xnew)
-    pl.plot(xnew,ynew,label=str(kind))
-pl.legend(loc="lower right")
-pl.show()
+##设置gmm函数
+gmm = GaussianMixture(n_components=4, covariance_type='full').fit(X)
+##训练数据
+y_pred = gmm.predict(X)
+
+##绘图
+plt.scatter(X[:, 0], X[:, 1], c=y_pred)
+plt.show()
