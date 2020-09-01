@@ -1,16 +1,18 @@
 import matplotlib.pyplot as plt
-from sklearn.datasets.samples_generator import make_blobs
-from sklearn.mixture import GaussianMixture
+import numpy as np
+from scipy.interpolate import interp1d
 
-# X为样本特征，Y为样本簇类别， 共1000个样本，每个样本2个特征，共4个簇，簇中心在[-1,-1], [0,0],[1,1], [2,2]
-X, y = make_blobs(n_samples=1000, n_features=2, centers=[[-1,-1], [0,0], [1,1], [2,2]], cluster_std=[0.4, 0.3, 0.4, 0.3],
-                  random_state = 0)
 
-##设置gmm函数
-gmm = GaussianMixture(n_components=4, covariance_type='full').fit(X)
-##训练数据
-y_pred = gmm.predict(X)
 
-##绘图
-plt.scatter(X[:, 0], X[:, 1], c=y_pred)
+
+x = np.linspace(0, 10, num=11, endpoint=True)
+y = np.cos(-x**2/9.0)
+f1 = interp1d(x, y, kind='nearest')
+f2 = interp1d(x, y, kind='zero')
+f3 = interp1d(x, y, kind='quadratic')
+
+xnew = np.linspace(0, 10, num=1001, endpoint=True)
+plt.plot(x, y, 'o')
+plt.plot(xnew, f1(xnew), '-', xnew, f2(xnew), '--', xnew, f3(xnew), ':')
+plt.legend(['data', 'nearest', 'zero', 'quadratic'], loc='best')
 plt.show()
