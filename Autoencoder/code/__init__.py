@@ -19,8 +19,8 @@ from sklearn.neighbors import KNeighborsClassifier
 import math
 
 # 预测船舶ID,预测点时间
-MMSI = "352844000"
-Basedatetime = "2017-02-03 11:03:40"
+MMSI = "367390380"
+Basedatetime = "2017-02-02 06:47:54"
 
 
 # 读取预测船舶的信息，返回真实航迹real_trajectory以及第一个点的信息first_point1
@@ -132,7 +132,7 @@ def getTrajectory(S0, first_point):
         # 使用cursor()方法获取操作游标
         cursor = db.cursor()
         # SQL 查询语句
-        sql_S0 = "SELECT * FROM aispoints WHERE  MMSI = '{0}' and  lat BETWEEN {1} AND {2} AND lon BETWEEN {3} AND {4} order by BaseDateTime ;".format(
+        sql_S0 = "SELECT * FROM aispoints WHERE  MMSI = '{0}' and  lat BETWEEN {1} AND {2} AND lon BETWEEN {3} AND {4} order by BaseDateTime;".format(
             S0[i][0], S0[i][2] - 2, S0[i][2] + 2, S0[i][3] - 2, S0[i][3] + 2)
         try:
             # 执行SQL语句,获得周围目标船舶的航迹
@@ -152,22 +152,19 @@ def getTrajectory(S0, first_point):
         LON = [k[4] for k in S0_tajectory]
         SOG = [k[5] for k in S0_tajectory]
         COG = [k[6] for k in S0_tajectory]
-        X = pd.date_range(start=first_time - datetime.timedelta(minutes=30), periods=121, freq='30S')
+        X = pd.date_range(start=first_time - datetime.timedelta(minutes=60), periods=121, freq='60S')
         X = list(X)
         XStamp = []
         for h in range(len(X)):
             XStamp.append(int(X[h].timestamp()))
-        # X = np.linspace(time-datetime.timedelta(seconds=30),time+datetime.timedelta(seconds=30),121)
-        # f = interpolate.interp1d(dateStamp, [LAT, LON, SOG, COG], kind="quadratic")
-        f_LAT = interpolate.interp1d(dateStamp, LAT, kind="linear")
-        f_LON = interpolate.interp1d(dateStamp, LON, kind="linear")
-        f_SOG = interpolate.interp1d(dateStamp, SOG, kind="linear")
-        f_COG = interpolate.interp1d(dateStamp, COG, kind="linear")
+        f_LAT = interpolate.interp1d(dateStamp, LAT, kind="quadratic")
+        f_LON = interpolate.interp1d(dateStamp, LON, kind="quadratic")
+        f_SOG = interpolate.interp1d(dateStamp, SOG, kind="quadratic")
+        f_COG = interpolate.interp1d(dateStamp, COG, kind="quadratic")
         LATS = f_LAT(XStamp)
         LONS = f_LON(XStamp)
         SOGS = f_SOG(XStamp)
         COGS = f_COG(XStamp)
-        # LATS, LONS, SOGS, COGS = f(XStamp)
         back = []
         forward = []
         for j in range(0, 60):
@@ -177,10 +174,6 @@ def getTrajectory(S0, first_point):
             forward.append([S0[i][0], X[m], LATS[m], LONS[m], SOGS[m], COGS[m]])
         forward_trajectory.append(forward)
         print("轨迹", i, "完成！")
-    # print("向后提取轨迹：")
-    # print(back_trajectory)
-    # print("向前提取轨迹：")
-    # print(forward_trajectory)
     back_select = back_trajectory[len(back_trajectory) - 1]
     forward_select = forward_trajectory[len(back_trajectory) - 1]
     del back_trajectory[len(back_trajectory) - 1]
@@ -249,10 +242,6 @@ def LDA_3(back_trajectory_with_label, back_select):
         for point in single_trajectory:
             del point[0]
             del point[4]
-        # single_trajectory = map(lambda x: x[1:], single_trajectory)
-        # single_trajectory = map(lambda x: x[5:], single_trajectory)
-        # # single_trajectory = np.delete(single_trajectory, 0, axis=1)
-        # # single_trajectory = np.delete(single_trajectory, 4, axis=1)
         back_trajectory_chain.append(list(chain.from_iterable(single_trajectory)))
     back1 = np.delete(back_select, 0, axis=1)
     back1 = np.delete(back1, 0, axis=1)
@@ -260,8 +249,6 @@ def LDA_3(back_trajectory_with_label, back_select):
     for k in back1:
         back2.append(list(k))
     a = list(sum(back2, []))
-    # back_trajectory_chain.append(list(sum(back2,[])))
-    # back_trajectory_chain = np.array(back_trajectory_chain)
     lda = LinearDiscriminantAnalysis(n_components=3)
     lda.fit(back_trajectory_chain, label)
     LDA_back1 = lda.transform(back_trajectory_chain)
@@ -375,10 +362,6 @@ def draw_prediction(real_trajectory,pre_trajectory,real_trajectory1):
         x, y = map(float(point[1]), float(point[0]))
         map.plot(y, x, marker='.', color='orange', markersize=1)  # 纬度放在前面，经度放在后面,橘色代表forward_trajectory
     print("预测取轨迹画图成功")
-    # for point in real_trajectory1:
-    #     x, y = map(float(point[4]), float(point[3]))
-    #     map.plot(y, x, marker='.', color='red', markersize=1)  # 纬度放在前面，经度放在后面,橘色代表forward_trajectory
-    # print("预测取轨迹画图成功")
     plt.savefig("test{0}预测轨迹.png".format(MMSI), dpi=1080)
     plt.show()
 
@@ -387,7 +370,6 @@ def out():
     first_point, result_trajectory = zuobiaozhou(first_point1[0])
     S0 = getS0(first_point, result_trajectory)
     back_trajectory, forward_trajectory, back_select,forward_select = getTrajectory(S0, first_point)
-    # draw(back_trajectory,forward_trajectory)
     PCA_forward = PCA_3(forward_trajectory)
     cluster_trajectory = clustering_trajectory(PCA_forward)
     back_trajectory_with_label = back_trajectory_label(back_trajectory, cluster_trajectory)
