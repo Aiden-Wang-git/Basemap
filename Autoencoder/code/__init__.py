@@ -128,12 +128,17 @@ def getTrajectory(S0, first_point):
     print("SO中一共会有", len(S0), "条航迹")
     S0.append(first_point)
     for i in range(len(S0)):
+        now_time = S0[i][1]
+        begin_time_date = now_time - datetime.timedelta(hours=2)
+        begin_time = datetime.datetime.strftime(begin_time_date, '%Y-%m-%d %H:%M:%S')
+        end_time_date = now_time + datetime.timedelta(hours=2)
+        end_time = datetime.datetime.strftime(end_time_date, '%Y-%m-%d %H:%M:%S')
         db = MySQLdb.connect("localhost", "root", "123456", "ais", charset='utf8')
         # 使用cursor()方法获取操作游标
         cursor = db.cursor()
         # SQL 查询语句
-        sql_S0 = "SELECT * FROM aispoints WHERE  MMSI = '{0}' and  lat BETWEEN {1} AND {2} AND lon BETWEEN {3} AND {4} order by BaseDateTime;".format(
-            S0[i][0], S0[i][2] - 2, S0[i][2] + 2, S0[i][3] - 2, S0[i][3] + 2)
+        sql_S0 = "SELECT * FROM aispoints WHERE  MMSI = '{0}' and  lat BETWEEN {1} AND {2} AND lon BETWEEN {3} AND {4} and BaseDateTime between '{5}' and '{6}' order by BaseDateTime;".format(
+            S0[i][0], S0[i][2] - 2, S0[i][2] + 2, S0[i][3] - 2, S0[i][3] + 2,begin_time,end_time)
         try:
             # 执行SQL语句,获得周围目标船舶的航迹
             cursor.execute(sql_S0)
@@ -141,7 +146,6 @@ def getTrajectory(S0, first_point):
         except:
             print
             "Error: unable to fecth data"
-        date = []
         first_time = S0[i][1]
         date = [l[2] for l in S0_tajectory]
         # 将时间转换为时间戳
@@ -152,15 +156,16 @@ def getTrajectory(S0, first_point):
         LON = [k[4] for k in S0_tajectory]
         SOG = [k[5] for k in S0_tajectory]
         COG = [k[6] for k in S0_tajectory]
-        X = pd.date_range(start=first_time - datetime.timedelta(minutes=60), periods=121, freq='60S')
+        X = pd.date_range(start=first_time - datetime.timedelta(minutes=30), periods=121, freq='30S')
         X = list(X)
+        print(X)
         XStamp = []
         for h in range(len(X)):
-            XStamp.append(int(X[h].timestamp()))
-        f_LAT = interpolate.interp1d(dateStamp, LAT, kind="quadratic")
-        f_LON = interpolate.interp1d(dateStamp, LON, kind="quadratic")
-        f_SOG = interpolate.interp1d(dateStamp, SOG, kind="quadratic")
-        f_COG = interpolate.interp1d(dateStamp, COG, kind="quadratic")
+            XStamp.append(X[h].to_pydatetime().timestamp())
+        f_LAT = interpolate.interp1d(dateStamp, LAT, kind="linear")
+        f_LON = interpolate.interp1d(dateStamp, LON, kind="linear")
+        f_SOG = interpolate.interp1d(dateStamp, SOG, kind="linear")
+        f_COG = interpolate.interp1d(dateStamp, COG, kind="linear")
         LATS = f_LAT(XStamp)
         LONS = f_LON(XStamp)
         SOGS = f_SOG(XStamp)
