@@ -19,8 +19,8 @@ from sklearn.neighbors import KNeighborsClassifier
 import math
 
 # 预测船舶ID,预测点时间
-MMSI = "367390380"
-Basedatetime = "2017-02-02 06:47:54"
+MMSI = "353288000"
+Basedatetime = "2018-01-08 20:45:33"
 
 
 # 读取预测船舶的信息，返回真实航迹real_trajectory以及第一个点的信息first_point1
@@ -29,8 +29,8 @@ def readdata():
     # 使用cursor()方法获取操作游标
     cursor = db.cursor()
     # SQL 查询语句
-    sql_truth = "SELECT * FROM aispoints WHERE  MMSI = '{0}' order by BaseDateTime ;".format(MMSI)
-    sql_truth_point = "SELECT * FROM aispoints WHERE  MMSI = '{0}'  and BaseDateTime = '{1}';".format(MMSI,Basedatetime)
+    sql_truth = "SELECT * FROM ais_2018_01_02 WHERE  MMSI = '{0}' order by BaseDateTime ;".format(MMSI)
+    sql_truth_point = "SELECT * FROM ais_2018_01_02 WHERE  MMSI = '{0}'  and BaseDateTime = '{1}';".format(MMSI,Basedatetime)
     try:
         # 执行SQL语句,获得预测真实航迹
         cursor.execute(sql_truth)
@@ -57,7 +57,7 @@ def zuobiaozhou(first_point2=[]):
     # 使用cursor()方法获取操作游标
     cursor = db.cursor()
     # SQL 查询语句,查询起始点附近0.05°的船只信息
-    sql_result = "SELECT * FROM aispoints WHERE lat BETWEEN {0} AND {1} AND lon BETWEEN {2} AND {3} AND MMSI!='{4}';".format(
+    sql_result = "SELECT * FROM ais_2018_01_02 WHERE lat BETWEEN {0} AND {1} AND lon BETWEEN {2} AND {3} AND MMSI!='{4}';".format(
         first_LAT - 0.05, first_LAT + 0.05, first_LON - 0.05, first_LON + 0.05, MMSI)
     try:
         # 执行SQL语句,获得预测真实航迹
@@ -77,8 +77,8 @@ def zuobiaozhou(first_point2=[]):
     result_trajectory = [[]]
     first_point = [first_point1[1], first_point1[2], first_point1[3], first_point1[4], first_point1[5], first_point1[6]]
     for i in range(len(result_trajectory1)):
-        if abs(first_point[5] - result_trajectory1[i][6]) < 15 or abs(first_point[5] - result_trajectory1[i][6]) > 345:
-            if abs(first_point[4] - result_trajectory1[i][5]) < 2:
+        if abs(first_point[5] - result_trajectory1[i][6]) < 45 or abs(first_point[5] - result_trajectory1[i][6]) > 315:
+            if abs(first_point[4] - result_trajectory1[i][5]) < 3: #航速差小于3节
                 result_trajectory.append([result_trajectory1[i][1], result_trajectory1[i][2], result_trajectory1[i][3],
                                           result_trajectory1[i][4], result_trajectory1[i][5], result_trajectory1[i][6]])
     del (result_trajectory[0])
@@ -90,11 +90,9 @@ def getDistanceDiffrentLat(Lat1, Lat2, Lon):
     distance = geodesic((Lat1, Lon), (Lat2, Lon)).nm
     return distance
 
-
 def getDistanceDiffrentLon(Lon1, Lon2, Lat):
     distance = geodesic((Lat, Lon1), (Lat, Lon2)).nm
     return distance
-
 
 def getDistance(pointA=[], pointB=[]):
     distance = geodesic((pointA[2], pointA[3]), (pointB[2], pointB[3])).nm
@@ -106,7 +104,7 @@ def getS0(first_point, result_trajectory):
     S0 = [[]]
     del (S0[0])
     for i in range(len(result_trajectory)):
-        if getDistance(first_point, result_trajectory[i]) < 2:
+        if getDistance(first_point, result_trajectory[i]) < 1:
             S0.append(result_trajectory[i])
     temp = {}
     for MMSI, BaseDateTime, LAT, LON, SOG, COG in S0:
@@ -137,7 +135,7 @@ def getTrajectory(S0, first_point):
         # 使用cursor()方法获取操作游标
         cursor = db.cursor()
         # SQL 查询语句
-        sql_S0 = "SELECT * FROM aispoints WHERE  MMSI = '{0}' and  lat BETWEEN {1} AND {2} AND lon BETWEEN {3} AND {4} and BaseDateTime between '{5}' and '{6}' order by BaseDateTime;".format(
+        sql_S0 = "SELECT * FROM ais_2018_01_02 WHERE  MMSI = '{0}' and  lat BETWEEN {1} AND {2} AND lon BETWEEN {3} AND {4} and BaseDateTime between '{5}' and '{6}' order by BaseDateTime;".format(
             S0[i][0], S0[i][2] - 2, S0[i][2] + 2, S0[i][3] - 2, S0[i][3] + 2,begin_time,end_time)
         try:
             # 执行SQL语句,获得周围目标船舶的航迹
@@ -158,10 +156,12 @@ def getTrajectory(S0, first_point):
         COG = [k[6] for k in S0_tajectory]
         X = pd.date_range(start=first_time - datetime.timedelta(minutes=30), periods=121, freq='30S')
         X = list(X)
-        print(X)
         XStamp = []
         for h in range(len(X)):
-            XStamp.append(X[h].to_pydatetime().timestamp())
+            XStamp.append(int(X[h].to_pydatetime().timestamp()))
+        if (XStamp[0] - dateStamp[0] < 1800)or (dateStamp[len(dateStamp)-1]-XStamp[120]<1800):
+            print('轨迹', i, '太长or太短，无法插值')
+            continue
         f_LAT = interpolate.interp1d(dateStamp, LAT, kind="linear")
         f_LON = interpolate.interp1d(dateStamp, LON, kind="linear")
         f_SOG = interpolate.interp1d(dateStamp, SOG, kind="linear")
@@ -203,7 +203,7 @@ def PCA_3(forward_trajectory):
     return k
 
 
-# 采用GMM模型对轨迹聚类，一共聚为K=7类，输入PCA_forward,返回cluster_trajectory
+# 采用GMM模型对轨迹聚类，一共聚为K=5类，输入PCA_forward,返回cluster_trajectory
 def clustering_trajectory(PCA_forward1):
     MMSI = []
     PCA_forward = []
@@ -213,7 +213,7 @@ def clustering_trajectory(PCA_forward1):
         MMSI.append(k[0])
         del k[0]
     ##设置gmm函数
-    gmm = GaussianMixture(n_components=4, covariance_type='full').fit(PCA_forward)
+    gmm = GaussianMixture(n_components=5, covariance_type='full').fit(PCA_forward)
     ##训练数据
     y_pred = gmm.predict(PCA_forward)
     cluster_trajectory = []
@@ -236,7 +236,7 @@ def back_trajectory_label(back_trajectory, cluster_trajectory):
 
 
 # 对back_trajectory_with_label采用LDA降维，输入back_trajectory_with_label和back_select,返回LDA_back与LDA_select
-def LDA_3(back_trajectory_with_label, back_select):
+def LDA_4(back_trajectory_with_label, back_select):
     back_trajectory_chain = []
     MMSI = []
     label = []
@@ -254,7 +254,7 @@ def LDA_3(back_trajectory_with_label, back_select):
     for k in back1:
         back2.append(list(k))
     a = list(sum(back2, []))
-    lda = LinearDiscriminantAnalysis(n_components=3)
+    lda = LinearDiscriminantAnalysis(n_components=4)
     lda.fit(back_trajectory_chain, label)
     LDA_back1 = lda.transform(back_trajectory_chain)
     LDA_select1 = lda.transform([a])
@@ -264,17 +264,17 @@ def LDA_3(back_trajectory_with_label, back_select):
     return LDA_back, LDA_select
 
 
-# 使用KNN分类算法，将LDA_back分类到LDP_select的类别当中，其中参数K=7，返回类别kind
-def KNN_7(LDA_back1, LDA_select1):
+# 使用KNN分类算法，将LDA_back分类到LDP_select的类别当中，其中参数K=4，返回类别kind
+def KNN_4(LDA_back1, LDA_select1):
     LDA_back = copy.deepcopy(LDA_back1)
     LDA_select = copy.deepcopy(LDA_select1)
     label = []
     for single in LDA_back:
         del single[0]
-        label.append(single[3])
-        del single[3]
+        label.append(single[4])
+        del single[4]
     del LDA_select[0][0]
-    k = 7
+    k = 4
     clf = KNeighborsClassifier(n_neighbors=k)
     clf.fit(LDA_back, label)
     kind = clf.predict(LDA_select)
@@ -288,11 +288,11 @@ def getWeight(LDA_back1, LDA_select1, kind):
     LDA_select = copy.deepcopy(LDA_select1)
     MMSI = []
     weigth = []
-    sum_weight = 0
+    sum_weight = 0.0
     del LDA_select[0][0]
     LDA_select1 = numpy.array(LDA_select[0])
     for single in LDA_back:
-        if single[4] == kind:
+        if single[5] == kind:
             MMSI.append(single[0])
             del single[0]
             del single[3]
@@ -326,47 +326,48 @@ def get_pre_trajectory(weight, forward_trajectory):
 
 # 轨迹提取画图
 def draw(back_trajectory, forward_trajectory):
-    map = Basemap(llcrnrlon=-180, llcrnrlat=51, urcrnrlon=-174, urcrnrlat=54,
-                  resolution='f', projection='tmerc', lat_0=53, lon_0=-178.5)
+    map = Basemap(llcrnrlon=-122.89, llcrnrlat=37.61, urcrnrlon=-122.90, urcrnrlat=37.62,
+                  resolution='c', projection='cea')
     map.drawmapboundary(fill_color='aqua')
     map.fillcontinents(color='coral', lake_color='aqua')
     map.drawcoastlines()
-    map.drawmeridians(np.arange(-180, -174 + 0.001, 0.5), labels=[1, 1, 1, 1])  # 经线
-    map.drawparallels(np.arange(51, 54 + 0.001, 0.5), labels=[1, 1, 1, 1])  # 纬线
+    # map.drawmeridians(np.arange(-180, -174 + 0.001, 0.5), labels=[1, 1, 1, 1])  # 经线
+    # map.drawparallels(np.arange(51, 54 + 0.001, 0.5), labels=[1, 1, 1, 1])  # 纬线
     # x是经度，y是纬度
-    for trajecctory in back_trajectory:
-        # print(point.lon,point.lat)
-        for point in trajecctory:
-            x, y = map(float(point[3]), float(point[2]))
-            map.plot(y, x, marker='.', color='green', markersize=1)  # 纬度放在前面，经度放在后面,绿色代表back_trajectory
-    print("back_trajectory画图成功")
-    for trajecctory in forward_trajectory:
-        # print(point.lon,point.lat)
-        for point in trajecctory:
-            x, y = map(float(point[3]), float(point[2]))
-            map.plot(y, x, marker='.', color='orange', markersize=1)  # 纬度放在前面，经度放在后面,橘色代表forward_trajectory
-    print("forward_trajectory取轨迹画图成功")
+
     plt.savefig("test{0}周围轨迹提取.png".format(MMSI), dpi=1080)
     plt.show()
 
 # 轨迹预测画图
-def draw_prediction(real_trajectory,pre_trajectory,real_trajectory1):
-    map = Basemap(llcrnrlon=-180, llcrnrlat=51, urcrnrlon=-174, urcrnrlat=54,
-                  resolution='f', projection='tmerc', lat_0=53, lon_0=-178.5)
+def draw_prediction(real_trajectory,pre_trajectory,back_trajectory, forward_trajectory,first_point):
+    map = Basemap(llcrnrlon=first_point[3]-0.1, llcrnrlat=first_point[2]-0.1, urcrnrlon=first_point[3]+0.1, urcrnrlat=first_point[2]+0.1,resolution='f')
     map.drawmapboundary(fill_color='aqua')
     map.fillcontinents(color='coral', lake_color='aqua')
     map.drawcoastlines()
-    map.drawmeridians(np.arange(-180, -174 + 0.001, 0.5), labels=[1, 1, 1, 1])  # 经线
-    map.drawparallels(np.arange(51, 54 + 0.001, 0.5), labels=[1, 1, 1, 1])  # 纬线
+    map.drawmeridians(np.arange(first_point[3]-0.1, first_point[3]+0.1, 0.02), labels=[1, 1, 1, 1])  # 经线
+    map.drawparallels(np.arange(first_point[2]-0.1, first_point[2]+0.1, 0.02), labels=[1, 1, 1, 1])  # 纬线
     # x是经度，y是纬度
     for point in real_trajectory:
         x, y = map(float(point[3]), float(point[2]))
-        map.plot(y, x, marker='.', color='green', markersize=1)  # 纬度放在前面，经度放在后面,绿色代表back_trajectory
+        map.plot(x, y, marker='.', color='green', markersize=1)  # 纬度放在前面，经度放在后面,绿色代表back_trajectory
     print("真实画图成功")
     for point in pre_trajectory:
         x, y = map(float(point[1]), float(point[0]))
-        map.plot(y, x, marker='.', color='orange', markersize=1)  # 纬度放在前面，经度放在后面,橘色代表forward_trajectory
+        map.plot(x, y, marker='.', color='orange', markersize=1)  # 纬度放在前面，经度放在后面,橘色代表forward_trajectory
     print("预测取轨迹画图成功")
+    # for trajecctory in back_trajectory:
+    #     for point in trajecctory:
+    #         x, y = map(float(point[1]), float(point[0]))
+    #         map.plot(x, y, marker='.', color='yellow', markersize=1)  # 纬度放在前面，经度放在后面,黄色代表back_trajectory
+    # print("back_trajectory画图成功")
+    # for trajecctory in forward_trajectory:
+    #     for point in trajecctory:
+    #         x, y = map(float(point[3]), float(point[2]))
+    #         map.plot(x, y, marker='.', color='blue', markersize=1)  # 纬度放在前面，经度放在后面,蓝色代表forward_trajectory
+    # print("forward_trajectory取轨迹画图成功")
+    # 绘制起点
+    first_point_x,first_point_y = map(float(first_point[3]),first_point[2])
+    map.plot(first_point_x, first_point_y, marker='.', color='red', markersize=1)  # 红色代表起点位置
     plt.savefig("test{0}预测轨迹.png".format(MMSI), dpi=1080)
     plt.show()
 
@@ -378,10 +379,9 @@ def out():
     PCA_forward = PCA_3(forward_trajectory)
     cluster_trajectory = clustering_trajectory(PCA_forward)
     back_trajectory_with_label = back_trajectory_label(back_trajectory, cluster_trajectory)
-    LDA_back, LDA_select = LDA_3(back_trajectory_with_label, back_select)
-    kind = KNN_7(LDA_back, LDA_select)
+    LDA_back, LDA_select = LDA_4(back_trajectory_with_label, back_select)
+    kind = KNN_4(LDA_back, LDA_select)
     weight = getWeight(LDA_back, LDA_select, kind)
     pre_trajectory = get_pre_trajectory(weight, forward_trajectory)
-    draw_prediction(back_select+forward_select,pre_trajectory,real_tajectory1)
-
+    draw_prediction(forward_select,pre_trajectory,back_trajectory,forward_trajectory,first_point)
 out()
