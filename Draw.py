@@ -1,5 +1,7 @@
 import copy
+import pymysql as pymysql
 
+pymysql.install_as_MySQLdb()
 import MySQLdb
 from math import radians, cos, sin, asin, sqrt
 
@@ -21,7 +23,7 @@ import math
 
 
 def draw(trajectory):
-    map = Basemap(llcrnrlon=-118.35, llcrnrlat=33.5, urcrnrlon=-118, urcrnrlat=33.7,resolution='f')
+    map = Basemap(llcrnrlon=-118.3, llcrnrlat=33.7, urcrnrlon=-118.2, urcrnrlat=33.8,resolution='f')
     map.drawmapboundary(fill_color='aqua')
     map.fillcontinents(color='coral', lake_color='aqua')
     map.drawcoastlines()
@@ -44,7 +46,7 @@ def get_Trajectory():
     # 使用cursor()方法获取操作游标
     cursor = db.cursor()
     # SQL 查询语句
-    sql_S0 = "SELECT * FROM ais_2018_01_02 where lat between 33.5 and 33.7 and lon between -118.35 and -118;"
+    sql_S0 = "SELECT * FROM ais_2018_01_02 WHERE MMSI = '366760650' AND BaseDateTime > '2018-01-02 12:39:49' AND BaseDateTime<'2018-01-02 12:52:29';"
     try:
         # 执行SQL语句,获得周围目标船舶的航迹
         cursor.execute(sql_S0)

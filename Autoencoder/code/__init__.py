@@ -1,5 +1,8 @@
 import copy
 
+import pymysql as pymysql
+
+pymysql.install_as_MySQLdb()
 import MySQLdb
 from math import radians, cos, sin, asin, sqrt
 
@@ -19,8 +22,8 @@ from sklearn.neighbors import KNeighborsClassifier
 import math
 
 # 预测船舶ID,预测点时间
-MMSI = "353288000"
-Basedatetime = "2018-01-08 20:45:33"
+MMSI = "367719640"
+Basedatetime = "2018-01-04 07:41:44"
 
 
 # 读取预测船舶的信息，返回真实航迹real_trajectory以及第一个点的信息first_point1
@@ -41,6 +44,10 @@ def readdata():
     except:
         print
         "Error: unable to fecth data"
+    if (first_point1[0][6] < -180):
+        first_point1[0][6] = 360 + first_point1[0][6]
+    if (first_point1[0][6] > 180):
+        first_point1[0][6] = first_point1[0][6] - 360
     return real_tajectory1, first_point1
 
 
@@ -77,8 +84,13 @@ def zuobiaozhou(first_point2=[]):
     result_trajectory = [[]]
     first_point = [first_point1[1], first_point1[2], first_point1[3], first_point1[4], first_point1[5], first_point1[6]]
     for i in range(len(result_trajectory1)):
+        result_trajectory1[i] = list(result_trajectory1[i])
+        if (result_trajectory1[i][6] < -180):
+            result_trajectory1[i][6] = 360 + result_trajectory1[i][6]
+        if (result_trajectory1[i][6] > 180):
+            result_trajectory1[i][6] = result_trajectory1[i][6] - 360
         if abs(first_point[5] - result_trajectory1[i][6]) < 45 or abs(first_point[5] - result_trajectory1[i][6]) > 315:
-            if abs(first_point[4] - result_trajectory1[i][5]) < 3: #航速差小于3节
+            if abs(first_point[4] - result_trajectory1[i][5]) < 5: #航速差小于3节
                 result_trajectory.append([result_trajectory1[i][1], result_trajectory1[i][2], result_trajectory1[i][3],
                                           result_trajectory1[i][4], result_trajectory1[i][5], result_trajectory1[i][6]])
     del (result_trajectory[0])
@@ -127,9 +139,9 @@ def getTrajectory(S0, first_point):
     S0.append(first_point)
     for i in range(len(S0)):
         now_time = S0[i][1]
-        begin_time_date = now_time - datetime.timedelta(hours=2)
+        begin_time_date = now_time - datetime.timedelta(hours=24)
         begin_time = datetime.datetime.strftime(begin_time_date, '%Y-%m-%d %H:%M:%S')
-        end_time_date = now_time + datetime.timedelta(hours=2)
+        end_time_date = now_time + datetime.timedelta(hours=24)
         end_time = datetime.datetime.strftime(end_time_date, '%Y-%m-%d %H:%M:%S')
         db = MySQLdb.connect("localhost", "root", "123456", "ais", charset='utf8')
         # 使用cursor()方法获取操作游标
@@ -154,6 +166,11 @@ def getTrajectory(S0, first_point):
         LON = [k[4] for k in S0_tajectory]
         SOG = [k[5] for k in S0_tajectory]
         COG = [k[6] for k in S0_tajectory]
+        for k in range(len(COG)):
+            if (COG[k]<-180):
+                COG[k] = 360+COG[k]
+            if(COG[k]>180):
+                COG[k] = COG[k] - 360
         X = pd.date_range(start=first_time - datetime.timedelta(minutes=30), periods=121, freq='30S')
         X = list(X)
         XStamp = []
@@ -264,7 +281,7 @@ def LDA_4(back_trajectory_with_label, back_select):
     return LDA_back, LDA_select
 
 
-# 使用KNN分类算法，将LDA_back分类到LDP_select的类别当中，其中参数K=4，返回类别kind
+# 使用KNN分类算法，将LDA_back分类到LDP_select的类别当中，其中参数K=8，返回类别kind
 def KNN_4(LDA_back1, LDA_select1):
     LDA_back = copy.deepcopy(LDA_back1)
     LDA_select = copy.deepcopy(LDA_select1)
@@ -274,7 +291,7 @@ def KNN_4(LDA_back1, LDA_select1):
         label.append(single[4])
         del single[4]
     del LDA_select[0][0]
-    k = 4
+    k = 8
     clf = KNeighborsClassifier(n_neighbors=k)
     clf.fit(LDA_back, label)
     kind = clf.predict(LDA_select)
@@ -302,6 +319,7 @@ def getWeight(LDA_back1, LDA_select1, kind):
     for i in weigth:
         sum_weight = sum_weight + i
     weigth = weigth / sum_weight
+    print("与select船舶相同类别轨迹的数目是：",len(weigth))
     return list(zip(MMSI, weigth))
 
 
