@@ -34,8 +34,8 @@ look_back = 1
 trainX,trainY  = create_dataset(trainlist,look_back)
 testX,testY = create_dataset(testlist,look_back)
 
-trainX = numpy.reshape(trainX, (trainX.shape[0], trainX.shape[1], 1))
-testX = numpy.reshape(testX, (testX.shape[0], testX.shape[1] ,1 ))
+# trainX = numpy.reshape(trainX, (trainX.shape[0], trainX.shape[1], 1))
+# testX = numpy.reshape(testX, (testX.shape[0], testX.shape[1] ,1 ))
 
 # create and fit the LSTM network
 model = Sequential()

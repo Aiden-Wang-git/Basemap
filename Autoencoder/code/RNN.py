@@ -2,9 +2,9 @@ import copy
 import numpy
 import matplotlib.pyplot as plt
 import scaler
-from keras.models import Sequential
+from keras import Sequential
 from keras.layers import Dense
-from keras.layers import LSTM
+from keras.layers import LSTM,GRU
 import  pandas as pd
 import  os
 from keras.models import Sequential, load_model
@@ -56,7 +56,7 @@ def getTrajectory(select_point):
     # 使用cursor()方法获取操作游标
     cursor = db.cursor()
     # SQL 查询语句
-    sql = "SELECT MMSI,BaseDateTime,LAT,LON,SOG,COG FROM ais_2018_01_02 WHERE  MMSI = '{0}' order by BaseDateTime ;".format(select_point[0])
+    sql = "SELECT MMSI,BaseDateTime,LAT,LON,SOG,COG FROM ais_2018_01_02 WHERE  MMSI = '{0}' and  BaseDateTime<'2018-01-01 03:37:55' order by BaseDateTime ;".format(select_point[0])
     try:
         # 执行SQL语句,获得预测真实航迹
         cursor.execute(sql)
@@ -76,11 +76,11 @@ def getTrajectory(select_point):
     LON = [k[3] for k in select_trajectory_row]
     SOG = [k[4] for k in select_trajectory_row]
     COG = [k[5] for k in select_trajectory_row]
-    print("开始时间：",select_trajectory_row[0][1])
-    print("结束时间：",select_trajectory_row[len(select_trajectory_row)-1][1])
+    print("开始时间：", select_trajectory_row[0][1])
+    print("结束时间：", select_trajectory_row[len(select_trajectory_row)-1][1])
     begin_time = int((select_trajectory_row[0][1]).timestamp())
     end_time = int((select_trajectory_row[len(select_trajectory_row)-1][1]).timestamp())
-    X = pd.date_range(start=select_trajectory_row[0][1],end=select_trajectory_row[len(select_trajectory_row)-1][1],  freq='60S')
+    X = pd.date_range(start=select_trajectory_row[0][1],end=select_trajectory_row[len(select_trajectory_row)-1][1],  freq='30S')
     X = list(X)
     XStamp = []
     for h in range(len(X)):
@@ -102,8 +102,33 @@ def getTrajectory(select_point):
     return select_trajectory
 
 # RNN中的LSTM预测
-def RNN_LSTM(select_trajectory):
-    select_trajectory = select_trajectory[1:]
+def RNN_LSTM(select_trajectory_withDate):
+    train_predict_lat, train_lat,test_predict_lat,test_lat= RNN_ONE(select_trajectory_withDate,1)
+    train_predict_lon, train_lon,test_predict_lon,test_lon= RNN_ONE(select_trajectory_withDate,2)
+    plt.plot(train_lon,train_lat, color='green')  # 绿色是真实数据
+    plt.plot(train_predict_lon,train_predict_lat, color='red')  # 红色是预测数据
+    plt.title('train_set')
+    plt.savefig('训练.png')
+    plt.xlim()
+    plt.show()
+    plt.plot(test_lon, test_lat,color='green')
+    plt.plot(test_predict_lon,test_predict_lat ,color='red')
+    plt.title('test_set')
+    plt.savefig('测试.png')
+    plt.show()
+
+
+def RNN_ONE(select_trajectory_withDate,i):
+    select_trajectory = []
+    for l in select_trajectory_withDate:
+        # 删除一行中第c列的值
+        rest_l = l[i:i+1]
+        # 将删除后的结果加入结果数组
+        select_trajectory.append(rest_l)
+    # 数据归一化
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    select_trajectory = scaler.fit_transform(select_trajectory)
+
     # 70%作为训练集，30%作为测试集
     train_size = int(len(select_trajectory) * 0.7)
     trainlist = select_trajectory[:train_size]
@@ -111,35 +136,28 @@ def RNN_LSTM(select_trajectory):
     look_back = 3
     trainX, trainY = create_dataset(trainlist, look_back)
     testX, testY = create_dataset(testlist, look_back)
-    trainX = numpy.reshape(trainX, (trainX.shape[0], trainX.shape[1], 4))
-    testX = numpy.reshape(testX, (testX.shape[0], testX.shape[1], 4))
-    #训练模型
+    # trainX = numpy.reshape(trainX, (trainX.shape[0], trainX.shape[1], 4))
+    # testX = numpy.reshape(testX, (testX.shape[0]/3, testX.shape[1], 4))
+    # 训练模型
     model = Sequential()
-    model.add(LSTM(4, input_shape=(None, 1)))
+    model.add(GRU(2, input_shape=(3, 1)))
     model.add(Dense(1))
-    model.compile(loss='mean_squared_error', optimizer='adam')
-    model.fit(trainX, trainY, epochs=100, batch_size=1, verbose=2)
-    #做预测
+    model.compile(loss='mean_squared_error', optimizer='adam', metrics='acc')
+    History = model.fit(trainX, trainY, epochs=100, batch_size=2, verbose=2)
+    # 做预测
     trainPredict = model.predict(trainX)
     testPredict = model.predict(testX)
+    plt.plot(History.history['loss'])
+    plt.title('Loss'+str(i))
+    plt.show()
     # 反归一化
     trainPredict = scaler.inverse_transform(trainPredict)
     trainY = scaler.inverse_transform(trainY)
     testPredict = scaler.inverse_transform(testPredict)
     testY = scaler.inverse_transform(testY)
-    plt.plot(trainY, color='green')  # 绿色是真实数据
-    plt.plot(trainPredict[1:], color='red')  # 红色是预测数据
-    plt.title('train_set')
-    plt.show()
-    plt.savefig('训练.png')
-    plt.plot(testY, color='green')
-    plt.plot(testPredict[1:], color='red')
-    plt.title('test_set')
-    plt.savefig('测试.png')
-    plt.show()
+    return trainPredict,trainY,testPredict,testY
 
-
-#这里的look_back与timestep相同，即利用前面多少步预测下一步
+# 这里的look_back与timestep相同，即利用前面多少步预测下一步
 def create_dataset(dataset, look_back):
     dataX, dataY = [], []
     for i in range(len(dataset) - look_back - 1):
@@ -149,6 +167,6 @@ def create_dataset(dataset, look_back):
     return numpy.array(dataX), numpy.array(dataY)
 
 
-select_point =  readData()
+select_point = readData()
 select_trajectory = getTrajectory(select_point)
 RNN_LSTM(select_trajectory)
