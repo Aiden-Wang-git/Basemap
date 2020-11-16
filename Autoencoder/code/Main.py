@@ -1,4 +1,5 @@
 import copy
+import heapq
 
 import pymysql as pymysql
 from scipy.interpolate import interp1d
@@ -185,20 +186,143 @@ def getTrajectory(S0,firstPoint):
     print("================轨迹提取完成=================")
     return backTrajectory, forwardTrajectory, backSelect, forwardSelect
     
-# 依据backTrajectory+forwardTrajectory对轨迹进行聚类
+# 依据backTrajectory+forwardTrajectory对轨迹进行聚类,60个2维AIS点数据+1个label
 def clusterKMeans(backTrajectory,forwardTrajectory):
     trajectory = []
-    trajectorySingle = []
     trajectoryChain = []  # 得到60*4=240维的数据
+    MMSI = [] # 记录每条航迹的MMSI
     for i in range(len(backTrajectory)):
+        MMSI.append(backTrajectory[i][0][0])
         trajectory.append(backTrajectory[i]+forwardTrajectory[i])
+    for i in range(len(trajectory)):
+        trajectorySingle = []
+        for j in range(len(trajectory[i])):
+            del trajectory[i][j][0:2]
+            del trajectory[i][j][2:]
+            trajectorySingle+=trajectory[i][j]
+        trajectoryChain.append(trajectorySingle)
     # for i in range(0,len(trajectory)):
     #     for j in range(0,len(trajectory[i])):
     #         trajectorySingle.extend(trajectory[i][j][2:])
     #     trajectoryChain.append(trajectorySingle)
 
-    label = DBSCAN(min_samples=2, metric=getDistanceTrajectory, eps=3,p=1).fit(np.array(trajectory))
-    print("KMeans分类任务完成")
+    # label = DBSCAN(min_samples=3,eps=15,leaf_size=100,metric= lambda a,b: getDistanceTrajectory(a,b)).fit_predict(trajectoryChain)
+    label = list(GaussianMixture(n_components=5,).fit_predict(trajectoryChain))
+    print("GMM聚类任务完成")
+    trajectoryLabel = []
+    backTrajectoryLabel = []
+    forwardTrajectoryLabel = []
+    for i in range(0,len(MMSI)):
+        trajectoryLabel.append(list(trajectoryChain[i]+[[label[i]]]))
+        backTrajectoryLabel.append(list(backTrajectory[i]+[[label[i]]]))
+        forwardTrajectoryLabel.append(list(forwardTrajectory[i]+[[label[i]]]))
+    trajectoryLabel = np.array(trajectoryLabel)
+    for i in range(0,240,2):
+        plt.scatter(trajectoryLabel[:,i],trajectoryLabel[:,i+1],c=sum(trajectoryLabel[:,240],[]),cmap=plt.cm.Spectral)
+    plt.title('cluster')
+    plt.show()
+    return backTrajectoryLabel,forwardTrajectoryLabel
+
+# 采用KNN算法分类，K=5，返回selectTrajectory的label
+def classifyKNN(backTrajectoryLabel1, backSelect):
+    backTrajectoryLabel = copy.deepcopy(backTrajectoryLabel1)
+    backCopy = []
+    selectCopy = []
+    label = []
+    for single in backTrajectoryLabel:
+        label.append(single[60][0])
+        del single[60]
+        backCopy.append(sum(single,[]))
+    for single in backSelect:
+        selectCopy+=single[2:4]
+    k = 5
+    clf = KNeighborsClassifier(n_neighbors=k,metric=getDistanceTrajectory)
+    clf.fit(backCopy, label)
+    kind = clf.predict([selectCopy])
+    print("=================KNN分类完成=================")
+    return kind[0]
+
+# 计算backTrajectory与backSelect的距离，根据权重和forwardTrajectory预测目标船舶将来的航迹
+def getPredict(backTrajectoryLabel1,forwardTrajectoryLabel1,backSelect1, label):
+    # backTrajectoryLabel = copy.deepcopy(backTrajectoryLabel1)
+    # forwardTrajectory = copy.deepcopy(forwardTrajectory1)
+    # backSelect = copy.deepcopy(backSelect1)
+    backTrajectoryLabel = []
+    forwardTrajectoryLabel = []
+    for i in range(len(backTrajectoryLabel1)):
+        backTrajectoryLabel.append(sum(backTrajectoryLabel1[i],[]))
+        forwardTrajectoryLabel.append(sum(forwardTrajectoryLabel1[i],[]))
+    backSelect = sum([i[2:4] for i in backSelect1], [])
+    weigth = []
+    for single in backTrajectoryLabel:
+        distance = getDistanceTrajectory(single[:120],backSelect)
+        weigth.append(1 / distance)
+    # for i in weigth:
+    #     sum_weight = sum_weight + i
+    # weightBack = [x/sum_weight for x in weigth]
+    print("与select船舶相同类别轨迹的数目是：",len(weigth))
+    preTrajectory = []
+    # ======================首轮预测=======================
+    DTW_distance = []
+    singlePredict = []
+    for single in backTrajectoryLabel:
+        DTW_distance.append(DTW(single[111:120],backSelect[110:119]))
+    min_index,min_num = find_min_nums(DTW_distance,10)
+    sumWeight = 0.0
+    for i in range(len(forwardTrajectoryLabel)):
+        if i in min_index:
+            singlePredict.append([x*weigth[i] for x in forwardTrajectoryLabel[i][:20]])
+            sumWeight+=weigth[i]
+    preTrajectory+=addList(singlePredict,sumWeight)
+    # =====================使用首轮预测的5min作为下一轮DTW算法的比较量，依次迭代继续预测剩下的25min
+    for i in range(20,len(forwardTrajectoryLabel[0])-20,20):
+        DTW_distance = []
+        singlePredict = []
+        for single in forwardTrajectoryLabel:
+            DTW_distance.append(DTW(single[i-20:i],preTrajectory[i-20:i]))
+        min_index, min_num = find_min_nums(DTW_distance, 10)
+        sumWeight = 0.0
+        for j in range(len(forwardTrajectoryLabel)):
+            if j in min_index:
+                singlePredict.append([x * weigth[j] for x in forwardTrajectoryLabel[j][i:i+20]])
+                sumWeight += weigth[j]
+        preTrajectory+=addList(singlePredict, sumWeight)
+    return preTrajectory
+
+# 计算两条轨迹之间的DTW距离
+def dtw_distance(ts_a, ts_b, d=lambda x, y: abs(x - y), mww=10000):
+    """Computes dtw distance between two time series
+
+    Args:
+        ts_a: time series a
+        ts_b: time series b
+        d: distance function
+        mww: max warping window, int, optional (default = infinity)
+
+    Returns:
+        dtw distance
+    """
+    # Create cost matrix via broadcasting with large int
+    ts_a, ts_b = np.array(ts_a), np.array(ts_b)
+    M, N = len(ts_a), len(ts_b)
+    cost = np.ones((M, N))
+
+    # Initialize the first row and column
+    cost[0, 0] = d(ts_a[0], ts_b[0])
+    for i in range(1, M):
+        cost[i, 0] = cost[i - 1, 0] + d(ts_a[i], ts_b[0])
+
+    for j in range(1, N):
+        cost[0, j] = cost[0, j - 1] + d(ts_a[0], ts_b[j])
+
+    # Populate rest of cost matrix within window
+    for i in range(1, M):
+        for j in range(max(1, i - mww), min(N, i + mww)):
+            choices = cost[i - 1, j - 1], cost[i, j - 1], cost[i - 1, j]
+            cost[i, j] = min(choices) + d(ts_a[i], ts_b[j])
+
+    # Return DTW distance given window
+    return cost[-1, -1]
 
 # ==================工具函数===============
 # 计算A、B两点实际距离
@@ -206,17 +330,84 @@ def getDistance(pointA=[], pointB=[]):
     distance = geodesic((pointA[0], pointA[1]), (pointB[0], pointB[1])).nm
     return distance
 
-# 计算两条轨迹之间的距离
+# 计算两条轨迹之间的距离,采用时间间隔为10×30S=300S
 def getDistanceTrajectory(trajectoryA = [],trajectoryB = []):
     distance = 0.0
-    for i in range(len(trajectoryA)):
-        distance+= getDistance(trajectoryA[i][2:4],trajectoryB[i][2:4])
+    for i in range(0,len(trajectoryA),10):
+        distance+= getDistance(trajectoryA[i:i+2],trajectoryB[i:i+2])
     return distance
+
+# 计算两条轨迹的DTW距离
+def DTW(ts_a, ts_b, d=lambda x, y: abs(x - y), mww=10000):
+    """Computes dtw distance between two time series
+
+    Args:
+        ts_a: time series a
+        ts_b: time series b
+        d: distance function
+        mww: max warping window, int, optional (default = infinity)
+
+    Returns:
+        dtw distance
+    """
+
+    # Create cost matrix via broadcasting with large int
+    ts_a, ts_b = np.array(ts_a), np.array(ts_b)
+    M, N = len(ts_a), len(ts_b)
+    cost = np.ones((M, N))
+
+    # Initialize the first row and column
+    cost[0, 0] = d(ts_a[0], ts_b[0])
+    for i in range(1, M):
+        cost[i, 0] = cost[i - 1, 0] + d(ts_a[i], ts_b[0])
+
+    for j in range(1, N):
+        cost[0, j] = cost[0, j - 1] + d(ts_a[0], ts_b[j])
+
+    # Populate rest of cost matrix within window
+    for i in range(1, M):
+        for j in range(max(1, i - mww), min(N, i + mww)):
+            choices = cost[i - 1, j - 1], cost[i, j - 1], cost[i - 1, j]
+            cost[i, j] = min(choices) + d(ts_a[i], ts_b[j])
+
+    # Return DTW distance given window
+    return cost[-1, -1]
+
+# 从DTW的list当中找到值最小的是个元素的索引和值
+def find_min_nums(nums, find_nums):
+    if len(nums) == len(list(set(nums))):
+        # 使用heapq
+        min_number = heapq.nsmallest(find_nums, nums)
+        min_num_index = list(map(nums.index, min_number))
+    else:
+        # 使用deepcopy
+        nums_copy = copy.deepcopy(nums)
+        max_num = max(nums) + 1
+        min_num_index = []
+        min_number = []
+        for i in range(find_nums):
+            num_min = min(nums_copy)
+            num_index = nums_copy.index(num_min)
+            min_number.append(num_min)
+            min_num_index.append(num_index)
+            nums_copy[num_index] = max_num
+    return min_num_index, min_number
+
+# 二维list逐行相加
+def addList(A,sumWeight):
+    B= []
+    for j in range(len(A[0])):
+        temp = 0
+        for i in range(len(A)):
+            temp+=A[i][j]
+        B.append(temp/sumWeight)
+    return B
 
 def out():
     realTrajectory, firstPoint = readBegin()
     S0 = getS0(firstPoint)
     backTrajectory, forwardTrajectory, backSelect, forwardSelect = getTrajectory(S0,firstPoint)
     backTrajectoryLabel,forwardTrajectoryLabel = clusterKMeans(backTrajectory,forwardTrajectory)
-
+    label = classifyKNN(backTrajectoryLabel,forwardSelect)
+    predictTrajectory = getPredict(backTrajectoryLabel,forwardTrajectoryLabel,backSelect,label)
 out()
