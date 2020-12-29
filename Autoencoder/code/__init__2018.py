@@ -187,7 +187,7 @@ def getTrajectory(S0, first_point):
         XStamp = []
         for h in range(len(X)):
             XStamp.append(int(X[h].to_pydatetime().timestamp()))
-        if (XStamp[0] - dateStamp[0] < 1800)or (dateStamp[len(dateStamp)-1]-XStamp[120]<1800):
+        if (XStamp[0] < dateStamp[0])or (dateStamp[len(dateStamp)-1]<XStamp[120]):
             print('轨迹', i, '太长or太短，无法插值')
             continue
         f_LAT = interpolate.interp1d(dateStamp, LAT, kind="linear")
