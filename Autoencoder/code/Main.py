@@ -6,7 +6,8 @@ import random
 import pymysql as pymysql
 from scipy.interpolate import interp1d
 from nltk.cluster.kmeans import KMeansClusterer
-
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import GridSearchCV
 import DTW
 from threading import Thread
 pymysql.install_as_MySQLdb()
@@ -30,7 +31,7 @@ from sklearn.neighbors import KNeighborsClassifier
 import math
 
 # 预测船舶主键ID,船舶MMSI，预测点时间
-ID = "32700834"
+ID = "38511417"
 GMMNum = 9  # GMM聚类个数
 MMSISelect = ""  # 存放目标船舶MMSI
 BaseDateTimeSelect = ""  # 存放初始点时间
@@ -185,8 +186,8 @@ def getTrajectory(S0, firstPoint):
         XStamp = []
         for h in range(len(X)):
             XStamp.append(int(X[h].to_pydatetime().timestamp()))
-        if (dateStamp[len(dateStamp) - 1] - dateStamp[0]) < 3600:
-            print("航迹持续时间小于60min，舍弃轨迹", i)
+        if (dateStamp[len(dateStamp) - 1] - dateStamp[0]) < 3000:
+            print("航迹持续时间小于50min，舍弃轨迹", i)
             continue
         if (max(np.diff(dateStamp))>600):
             print("轨迹存在相邻时间间隔大于10min，舍弃轨迹",i)
@@ -247,11 +248,11 @@ def clusterKmeans(backTrajectory, forwardTrajectory, backSelect, forwardSelect):
     #         trajectorySingle.extend(trajectory[i][j][2:])
     #     trajectoryChain.append(trajectorySingle)
     # 数据标准化
-    trajectoryChainStand = StandardScaler().fit_transform(trajectoryChain)
-    pca = PCA(n_components= 24)
-    trajectoryChainPCA = pca.fit_transform(trajectoryChain)
+    # trajectoryChainStand = StandardScaler().fit_transform(trajectoryChain)
+    # pca = PCA(n_components= 24)
+    # trajectoryChainPCA = pca.fit_transform(trajectoryChain)
+    eps = 5
     COGS = []
-    eps = 0.05
     for i in SOGANDCOG:
         COGS.append(i[1::2])
     COGSStand = StandardScaler().fit_transform(COGS)
@@ -275,9 +276,26 @@ def clusterKmeans(backTrajectory, forwardTrajectory, backSelect, forwardSelect):
     result = np.triu(result)
     result += result.T-np.diag(result.diagonal())
     end1 = time.time()
-    print("测试用时：",end1-bgin1)
+    print("计算相似性矩阵用时：",end1-bgin1)
     begin = time.time()
-    label = DBSCAN(min_samples=5, eps=eps, leaf_size=1000, metric=DBSCANDistance).fit_predict(trajectoryChain)
+    # 构建空列表，用于保存不同参数组合下的结果
+    res = []
+    for eps in np.arange(1,100,1):
+        # 迭代不同的min_samples值
+        for min_samples in range(2, 10):
+            dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
+            label = dbscan.fit(np.array(result))
+            # 统计各参数组合下的聚类个数（-1表示异常点）
+            n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
+            # 异常点的个数
+            outliners = np.sum(np.where(dbscan.labels_ == -1, 1, 0))
+            # 统计每个簇的样本个数
+            stats = str(pd.Series([i for i in dbscan.labels_ if i != -1]).value_counts().values)
+            res.append({'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outliners,
+                        'stats': stats})
+        print("eps：",eps,"结束")
+    df = pd.DataFrame(res)
+    label = DBSCAN(min_samples=6, eps=72, leaf_size=1000, metric='precomputed').fit_predict(np.array(result))
     end = time.time()
     print("聚类用时：",end-begin)
     print("聚类类别：",label)
@@ -297,14 +315,14 @@ def clusterKmeans(backTrajectory, forwardTrajectory, backSelect, forwardSelect):
         trajectoryLabel.append(list(trajectoryChain[i] + [[label[i]]]))
         backTrajectoryLabel.append(list(backTrajectory[i] + [[label[i]]]))
         forwardTrajectoryLabel.append(list(forwardTrajectory[i] + [[label[i]]]))
-    trajectoryLabel = np.array(trajectoryLabel)
+    # trajectoryLabel = np.array(trajectoryLabel)
     # ===========================展示聚类结果======================
     # for i in range(0,240,2):
     #     plt.scatter(trajectoryLabel[:,i+1],trajectoryLabel[:,i],c=sum(trajectoryLabel[:,240],[]),cmap=plt.cm.Spectral)
     for single in trajectoryLabel:
         # 不展示异常轨迹
-        if(single[len(single) - 1][0]==-1):
-            continue
+        # if(single[len(single) - 1][0]==-1):
+        #     continue
         c = num_to_color(single[len(single) - 1][0])
         plt.plot([single[2 * i + 1] for i in range(0, 120, 2)], [single[2 * i] for i in range(0, 120, 2)], color=c)
     if not os.path.exists(dirs):
@@ -320,16 +338,30 @@ def clusterKmeans(backTrajectory, forwardTrajectory, backSelect, forwardSelect):
 def clusterDistance(name,cogs,trajectoryChain,start,end):
     distanc = []
     distanc1 = []
+    a = 0.5
     for i in range(start,end,1):
         t1 = time.time()
         for x in range(i+1):
             distanc1.append(0)
         for j in range(i + 1, len(trajectoryChain)):
             sum = 0
-            for k in range(0, 120, 10):
-                # sum+=getPointDistance(trajectoryChain[i][k:k+2],trajectoryChain[j][k:k+2])
-                # sum += abs(angle(trajectoryChain[i][k:k + 2], trajectoryChain[j][k:k + 2]))
-                sum+=abs(cogs[i][k]-cogs[j][k])
+            for k in range(0, 240, 10):
+                # sum+= math.sqrt((trajectoryChain[i][k]-trajectoryChain[j][k])**2+(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])**2)
+                disSOG = abs(angle(trajectoryChain[i][k:k + 2], trajectoryChain[j][k:k + 2]))*(10**5)
+                # sum+=abs(cogs[i][k]-cogs[j][k])/360*getPointDistance(trajectoryChain[i][2*k:2*k+2],trajectoryChain[j][2*k:2*k+2])
+                # d1 = math.sqrt((trajectoryChain[i][k]-trajectoryChain[j][k])**2+(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])**2)
+                # d2 = math.sqrt((trajectoryChain[i][k+8]-trajectoryChain[j][k+8])**2+(trajectoryChain[i][k+9]-trajectoryChain[j][k+9])**2)
+                # b1 = math.sqrt((trajectoryChain[i][k+8]-trajectoryChain[i][k])**2+(trajectoryChain[i][k+9]-trajectoryChain[i][k+1])**2)
+                # b2 = math.sqrt((trajectoryChain[j][k+8]-trajectoryChain[j][k])**2+(trajectoryChain[j][k+9]-trajectoryChain[j][k+1])**2)
+                # Angle = abs((cogs[i][k]+cogs[i][k+8])/2-(cogs[j][k]+cogs[j][k+8])/2)
+                # if Angle>math.pi/2:
+                #     Angle = math.pi/2
+                # sum+=abs(cogs[i][k]-cogs[j][k])*math.sqrt((trajectoryChain[i][k]-trajectoryChain[j][k])**2+(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])**2)
+                # sum+=abs(cogs[i][k]-cogs[j][k])*a+(1-a)*math.sqrt((trajectoryChain[i][k]-trajectoryChain[j][k])**2+(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])**2)
+                # sum+= d1+d2+(b1*math.sin(Angle)+b2*math.sin(Angle))/2
+                # sum+=abs(cogs[i][k]-cogs[j][k])
+                dis = abs(trajectoryChain[i][k]-trajectoryChain[j][k])+abs(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])*(10**2)
+                sum+=disSOG*0.6 + dis*0.4
             distanc1.append(sum)
         distanc.append(distanc1)
         distanc1=[]
@@ -352,7 +384,7 @@ def classifyKNN(backTrajectoryLabel1, backSelect):
         backCopy.append(sum(single, []))
     for single in backSelect:
         selectCopy += single[2:4]
-    k = 40
+    k = KNNvalidation(dataSet=backCopy,label=label)
     begin = time.time()
     print("开始分类时间：", begin)
     # clf = KNeighborsClassifier(n_neighbors=k,metric=getPointDistanceTrajectoryBack,n_jobs=-1)
@@ -364,6 +396,16 @@ def classifyKNN(backTrajectoryLabel1, backSelect):
     print("=================KNN分类完成=================")
     return kind
 
+# 交叉验证KNN分类时K值的大小
+def KNNvalidation(dataSet,label):
+    parameters = {'n_neighbors':range(1,21)}
+    knn = KNeighborsClassifier()  # 注意：这里不用指定参数
+    # 通过GridSearchCV来搜索最好的K值。这个模块的内部其实就是对每一个K值进行评估
+    clf = GridSearchCV(knn, parameters, cv=5)  # 5折
+    clf.fit(dataSet, label)
+    # 输出最好的参数以及对应的准确率
+    print("最终最佳准确率：%.2f" % clf.best_score_, "最终的最佳K值", clf.best_params_)
+    return clf.best_params_['n_neighbors']
 
 # 计算backTrajectory与backSelect的距离，根据权重和forwardTrajectory预测目标船舶将来的航迹
 def getPredict(backTrajectoryLabel1, forwardTrajectoryLabel1, backSelect1, label, forwardSelect1, firstPoint,
@@ -555,7 +597,7 @@ def classify(input, dataSet, label, k):
     for single in dataSet:
         dist.append(getDistanceClassfiy(single,input))
     ##对距离进行排序
-    sortedDistIndex = np.argsort(dist)  ##argsort()根据元素的值从大到小对元素进行排序，返回下标
+    sortedDistIndex = np.argsort(dist)  ##argsort()根据元素的值从小到大对元素进行排序，返回下标
     classCount = {}
     for i in range(k):
         voteLabel = label[sortedDistIndex[i]]
@@ -683,7 +725,6 @@ def DBSCANDistance(A,B):
     sum = 0
     for a,b in zip(np.array(A).reshape(120,2),np.array(B).reshape(120,2)):
         sum+=(a[0]-b[0])**2
-    print("计算一次度量")
     return sum
 
 def out():
