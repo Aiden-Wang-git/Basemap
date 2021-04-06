@@ -31,7 +31,7 @@ from sklearn.neighbors import KNeighborsClassifier
 import math
 
 # 预测船舶主键ID,船舶MMSI，预测点时间
-ID = "38511417"
+ID = "34359216"
 GMMNum = 9  # GMM聚类个数
 MMSISelect = ""  # 存放目标船舶MMSI
 BaseDateTimeSelect = ""  # 存放初始点时间
@@ -194,7 +194,6 @@ def getTrajectory(S0, firstPoint):
             continue
         if (XStamp[0] < dateStamp[0])-600 or (dateStamp[len(dateStamp) - 1] < XStamp[120]-600):
             print('轨迹', i, '左右边界不足，需要外插')
-        S1.append(S0[i])
         f_LAT = interpolate.interp1d(dateStamp, LAT, kind="linear", fill_value='extrapolate')
         f_LON = interpolate.interp1d(dateStamp, LON, kind="linear", fill_value='extrapolate')
         f_SOG = interpolate.interp1d(dateStamp, SOG, kind="linear", fill_value='extrapolate')
@@ -214,11 +213,13 @@ def getTrajectory(S0, firstPoint):
         for m in range(61, 121):
             forward.append([S0[i][0], X[m], LATS[m], LONS[m], SOGS[m], COGS[m]])
         forwardTrajectory.append(forward)
+        S1.append(S0[i])
         print("轨迹", i, "完成！")
     backSelect = backTrajectory[len(backTrajectory) - 1]
     forwardSelect = forwardTrajectory[len(backTrajectory) - 1]
     del backTrajectory[len(backTrajectory) - 1]
     del forwardTrajectory[len(forwardTrajectory) - 1]
+    del S1[len(S1)-1]
     # del S1[-1:]
     print("================轨迹提取完成=================")
     return backTrajectory, forwardTrajectory, backSelect, forwardSelect, S1
@@ -280,7 +281,7 @@ def clusterKmeans(backTrajectory, forwardTrajectory, backSelect, forwardSelect):
     begin = time.time()
     # 构建空列表，用于保存不同参数组合下的结果
     res = []
-    for eps in np.arange(1,100,1):
+    for eps in np.arange(0.01,5,0.01):
         # 迭代不同的min_samples值
         for min_samples in range(2, 10):
             dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
@@ -295,7 +296,7 @@ def clusterKmeans(backTrajectory, forwardTrajectory, backSelect, forwardSelect):
                         'stats': stats})
         print("eps：",eps,"结束")
     df = pd.DataFrame(res)
-    label = DBSCAN(min_samples=6, eps=72, leaf_size=1000, metric='precomputed').fit_predict(np.array(result))
+    label = DBSCAN(min_samples=5, eps=0.24, leaf_size=1000, metric='precomputed').fit_predict(np.array(result))
     end = time.time()
     print("聚类用时：",end-begin)
     print("聚类类别：",label)
@@ -321,15 +322,15 @@ def clusterKmeans(backTrajectory, forwardTrajectory, backSelect, forwardSelect):
     #     plt.scatter(trajectoryLabel[:,i+1],trajectoryLabel[:,i],c=sum(trajectoryLabel[:,240],[]),cmap=plt.cm.Spectral)
     for single in trajectoryLabel:
         # 不展示异常轨迹
-        # if(single[len(single) - 1][0]==-1):
-        #     continue
+        if(single[len(single) - 1][0]==-1):
+            continue
         c = num_to_color(single[len(single) - 1][0])
         plt.plot([single[2 * i + 1] for i in range(0, 120, 2)], [single[2 * i] for i in range(0, 120, 2)], color=c)
     if not os.path.exists(dirs):
         os.makedirs(dirs)
     plt.plot([x[3] for x in backSelect], [x[2] for x in backSelect], color='black')
     plt.plot([x[3] for x in forwardSelect], [x[2] for x in forwardSelect], color='black')
-    plt.title('cluster,pes='+str(eps))
+    plt.title('cluster,eps='+str(eps))
     plt.savefig(dirs + '/聚类'+str(eps)+'.png', dpi=1080)
     plt.show()
     return backTrajectoryLabel, forwardTrajectoryLabel, SOGANDCOG
@@ -347,7 +348,7 @@ def clusterDistance(name,cogs,trajectoryChain,start,end):
             sum = 0
             for k in range(0, 240, 10):
                 # sum+= math.sqrt((trajectoryChain[i][k]-trajectoryChain[j][k])**2+(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])**2)
-                disSOG = abs(angle(trajectoryChain[i][k:k + 2], trajectoryChain[j][k:k + 2]))*(10**5)
+                disSOG = abs(angle([trajectoryChain[i][k + 8]-trajectoryChain[i][k],trajectoryChain[i][k + 9]-trajectoryChain[i][k+1]], [trajectoryChain[j][k + 8]-trajectoryChain[j][k],trajectoryChain[j][k + 9]-trajectoryChain[j][k+1]]))/10
                 # sum+=abs(cogs[i][k]-cogs[j][k])/360*getPointDistance(trajectoryChain[i][2*k:2*k+2],trajectoryChain[j][2*k:2*k+2])
                 # d1 = math.sqrt((trajectoryChain[i][k]-trajectoryChain[j][k])**2+(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])**2)
                 # d2 = math.sqrt((trajectoryChain[i][k+8]-trajectoryChain[j][k+8])**2+(trajectoryChain[i][k+9]-trajectoryChain[j][k+9])**2)
@@ -360,8 +361,8 @@ def clusterDistance(name,cogs,trajectoryChain,start,end):
                 # sum+=abs(cogs[i][k]-cogs[j][k])*a+(1-a)*math.sqrt((trajectoryChain[i][k]-trajectoryChain[j][k])**2+(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])**2)
                 # sum+= d1+d2+(b1*math.sin(Angle)+b2*math.sin(Angle))/2
                 # sum+=abs(cogs[i][k]-cogs[j][k])
-                dis = abs(trajectoryChain[i][k]-trajectoryChain[j][k])+abs(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])*(10**2)
-                sum+=disSOG*0.6 + dis*0.4
+                dis = abs(trajectoryChain[i][k]-trajectoryChain[j][k])+abs(trajectoryChain[i][k+1]-trajectoryChain[j][k+1])
+                sum+=disSOG*0 + dis*1
             distanc1.append(sum)
         distanc.append(distanc1)
         distanc1=[]
@@ -401,7 +402,7 @@ def KNNvalidation(dataSet,label):
     parameters = {'n_neighbors':range(1,21)}
     knn = KNeighborsClassifier()  # 注意：这里不用指定参数
     # 通过GridSearchCV来搜索最好的K值。这个模块的内部其实就是对每一个K值进行评估
-    clf = GridSearchCV(knn, parameters, cv=5)  # 5折
+    clf = GridSearchCV(knn, parameters, cv=10)  # 10折
     clf.fit(dataSet, label)
     # 输出最好的参数以及对应的准确率
     print("最终最佳准确率：%.2f" % clf.best_score_, "最终的最佳K值", clf.best_params_)
@@ -451,8 +452,13 @@ def getPredict(backTrajectoryLabel1, forwardTrajectoryLabel1, backSelect1, label
     singlePredict = []
     moves = []
     for single, singleFoward,oneSOG,S1LabelSingle in zip(backTrajectoryLabel, forwardTrajectoryLabel,SOGs,S1Label):
-        distance, move = getDistancePrediction(single[100:120], backSelect[100:120], singleFoward[0:20],oneSOG[50:60], SOGFirst,
-                                               firstPoint[2:4],S1LabelSingle[2:4]) #此处应该设置周围船舶的起点位置
+        distance, move = getDistancePrediction(single[100:120],
+                                               backSelect[100:120],
+                                               singleFoward[0:20],
+                                               oneSOG[50:60],
+                                               SOGFirst,
+                                               firstPoint[2:4],
+                                               S1LabelSingle[2:4]) #此处应该设置周围船舶的起点位置
         trajectoryDistance.append(distance)
         moves.append(move)
     min_index, min_num = find_min_nums(trajectoryDistance, 10)
@@ -468,11 +474,13 @@ def getPredict(backTrajectoryLabel1, forwardTrajectoryLabel1, backSelect1, label
         singlePredict = []
         moves = []
         for single, oneSOG in zip(forwardTrajectoryLabel,SOGs):
-            distance, move = getDistancePrediction(single[i:i + 20], preTrajectory[-20:],
+            distance, move = getDistancePrediction(single[i:i + 20],
+                                                   preTrajectory[-20:],
                                                    single[i + 20:i + 40],
                                                    oneSOG[(60 + int(i / 2)):(70 + int(i / 2))],
                                                    SOGFirst,
-                                                   preTrajectory[-2:], single[i + 18:i+20])
+                                                   preTrajectory[-2:],
+                                                   single[i + 18:i+20])
             trajectoryDistance.append(distance)
             moves.append(move)
         min_index, min_num = find_min_nums(trajectoryDistance, 10)
@@ -502,10 +510,10 @@ def getError(preTrajectory, forwardSelect, firstPoint):
     plt.plot([x[3] for x in forwardSelect], [x[2] for x in forwardSelect], 'o', color='green',label="real")  # 真实点用绿色
     plt.plot([preTrajectory[2 * i + 1] for i in range(0, 60, 1)], [preTrajectory[2 * i] for i in range(0, 60, 1)],
              color='red')  # 预测点用红色
-    plt.plot([preTrajectory[2 * i + 1] for i in range(0, 60, 1)], [preTrajectory[2 * i] for i in range(0, 60, 1)], 'o',
+    plt.plot([preTrajectory[2 * i + 1] for i in range(0, 60, 1)], [preTrajectory[2 * i] for i in range(0, 60, 1)], '^',
              color='red',label="predict")  # 预测点用红色
-    plt.plot(firstPoint[3], firstPoint[2], color='black', marker='x')  # 预测的起点
-    plt.title('Predicted results')
+    plt.plot(firstPoint[3], firstPoint[2], color='black', marker='x',label="start")  # 预测的起点
+    plt.title('Predicted result')
     plt.savefig(dirs + '/预测结果.png', dpi=1080)
     plt.legend()
     plt.show()
@@ -640,8 +648,11 @@ def getDistancePrediction(A, B, C, OneSog, SogFirst, start, pastPoint):
 # 在分类时确定A、B两条轨迹之间的距离
 def getDistanceClassfiy(A, B):
     distance = 0
-    for i in range(0, len(A)-3, 2):
-        distance += abs(angle([A[i + 2]-A[i],A[i+3]-A[i+1]], [B[i + 2]-B[i],B[i+3]-B[i+1]]))
+    for i in range(0, len(A), 10):
+        disSOG = abs(angle([A[i+2]-A[i],A[i+3]-A[i+1]],[B[i + 2]-B[i],B[i+3]-B[i+1]]))*10
+        dis = abs(A[i]-B[i])+abs(A[i+1]-B[i+1])
+        distance+=disSOG*0.6+dis*0.4
+        # distance += abs(angle([A[i + 2]-A[i],A[i+3]-A[i+1]], [B[i + 2]-B[i],B[i+3]-B[i+1]]))
     return distance
 
 # 分类时，计算轨迹之间的欧氏距离,输入120维数据，A是周围轨迹，B是目标船轨迹，采样间隔为5min
