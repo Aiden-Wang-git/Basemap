@@ -95,7 +95,7 @@ def main():
     for i in range(len(d.points)):
         dx.append(d.points[i].x)
         dy.append(d.points[i].y)
-    a1.plot(dx, dy, color='g', linestyle='-', marker='+')
+    a1.plot(dx, dy, color='g', linestyle='-')
 
     d.compress(d.points[0], d.points[len(d.points) - 1])
 
@@ -106,7 +106,7 @@ def main():
     for p in d.points:
         dx1.append(p.x)
         dy1.append(p.y)
-    a2.plot(dx1, dy1, color='r', linestyle='-', marker='+')
+    a2.plot(dx1, dy1, color='r', linestyle='-')
 
     # print "========================\n"
     # d.printPoint()
