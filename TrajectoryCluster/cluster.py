@@ -86,6 +86,7 @@ compressError = []
 for trajectory in trajectories:
     trajectory.compress(trajectory.points[0], trajectory.points[trajectory.count - 1])
     compressError.append(trajectory.error / trajectory.deleteNum)
+    trajectory.deleteCircle()
 df = pd.DataFrame(compressError)
 df.plot.box(title="Compress Error")
 plt.grid(linestyle="--", alpha=0.3)
@@ -122,10 +123,10 @@ for eps in np.arange(0.01, 1, 0.01):
         dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
         label = dbscan.fit(np.array(traDistances)).labels_
         n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
-        print("聚类个数：", n_clusters)
+        # print("聚类个数：", n_clusters)
         # 异常点的个数
         outLiners = np.sum(np.where(dbscan.labels_ == -1, 1, 0))
-        print("异常航迹个数：", outLiners)
+        # print("异常航迹个数：", outLiners)
         # 统计每个簇的样本个数
         stats = pd.Series([i for i in dbscan.labels_ if i != -1]).value_counts().values
         res.append(
