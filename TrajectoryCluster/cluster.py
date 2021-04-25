@@ -65,10 +65,12 @@ def drawTrajectory(title):
         for i in range(trajectory.getLength()):
             dx.append(trajectory.points[i].LON)
             dy.append(trajectory.points[i].LAT)
-        a1.plot(dx, dy, color='r', linestyle='-')
-        dx.clear()
-        dy.clear()
+        dx = np.array(dx)
+        dy = np.array(dy)
+        a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
+                  color='r', linestyle='-', width=0.003)
     plt.title(title)
+    plt.savefig(title, dpi=1080)
     plt.show()
 
 
@@ -85,8 +87,9 @@ print("压缩前共有AIS点：", aisNumBefore)
 compressError = []
 for trajectory in trajectories:
     trajectory.compress(trajectory.points[0], trajectory.points[trajectory.count - 1])
-    compressError.append(trajectory.error / trajectory.deleteNum)
     trajectory.deleteCircle()
+    compressError.append(trajectory.error / trajectory.deleteNum)
+print("压缩平均误差：", sum(compressError) / len(compressError))
 df = pd.DataFrame(compressError)
 df.plot.box(title="Compress Error")
 plt.grid(linestyle="--", alpha=0.3)
@@ -165,8 +168,14 @@ for trajectory in trajectories:
     for point in trajectory.points:
         dx.append(point.LON)
         dy.append(point.LAT)
-    a1.plot(dx, dy, color=colorLabel, linestyle='-')
+    dx = np.array(dx)
+    dy = np.array(dy)
+    # a1.plot(dx, dy, color=, linestyle='-')
+    a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
+              color=colorLabel, linestyle='-', width=0.003)
     plt.plot()
+plt.title("cluster results")
+plt.savefig("cluster results", dpi=1080)
 plt.show()
 
 print("结束！")
