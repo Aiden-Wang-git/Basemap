@@ -7,9 +7,10 @@ from TrajectoryCluster.trajectory import Trajectory
 import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
-from TrajectoryCluster.dtw import DTW
+from TrajectoryCluster.dtw import DTW, DTWSpatialDis
 import numpy as np
 from sklearn.cluster import DBSCAN
+from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score  # 计算 轮廓系数，CH 指标，DBI
 
 engine = create_engine("mysql+pymysql://root:123456@localhost:3306/ais?charset=utf8")
 # 创建session
@@ -38,8 +39,9 @@ session.close()
 # 将航迹依据MMSI分开
 # 将间隔时间大于10min的轨迹断开
 MMSI = datas[0].MMSI
+vesselType = datas[0].VesselType
 trajectories = []
-trajectory = Trajectory(MMSI)
+trajectory = Trajectory(MMSI,vesselType)
 for data in datas:
     if data.MMSI == MMSI:
         if trajectory.getLength() == 0 or \
@@ -49,7 +51,8 @@ for data in datas:
     if len(trajectory.points) > 35:
         trajectories.append(trajectory)
     MMSI = data.MMSI
-    trajectory = Trajectory(MMSI)
+    vesselType = data.VesselType
+    trajectory = Trajectory(MMSI,vesselType)
     trajectory.add_point(data)
 print("共有轨迹条数：", len(trajectories))
 
@@ -92,7 +95,7 @@ for trajectory in trajectories:
 print("压缩平均误差：", sum(compressError) / len(compressError))
 df = pd.DataFrame(compressError)
 df.plot.box(title="Compress Error")
-plt.grid(linestyle="--", alpha=0.3)
+plt.grid(linestyle="--", alpha=0.1)
 plt.show()
 
 # 航迹压缩后共存在AIS点个数
@@ -108,23 +111,43 @@ drawTrajectory("After Compress")
 # print(len(datas))
 
 # ===================================调用DTW计算航迹之间的距离======================================
+# 保存航迹距离
 traDistances = []
+# 保存位置距离
+traDistancesSpa = []
+# 统计计算次数
+countNum = 0
 for i in range(len(trajectories)):
     traDistance = []
+    traDistanceSpa = []
     for k in range(i + 1):
         traDistance.append(0)
+        traDistanceSpa.append(0)
     for j in range(i + 1, len(trajectories)):
+        # 真实实验
         traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
+        # 对比试验
+        # traDistance.append(DTWCompare(trajectories[i].points, trajectories[j].points))
+        traDistanceSpa.append(DTWSpatialDis(trajectories[i].points, trajectories[j].points))
+        countNum = countNum + len(trajectories[i].points) * len(trajectories[j].points)
     traDistances.append(traDistance)
+    traDistancesSpa.append(traDistanceSpa)
 traDistances = np.triu(np.array(traDistances))
+traDistancesSpa = np.triu(np.array(traDistancesSpa))
 traDistances += traDistances.T - np.diag(traDistances.diagonal())
+traDistancesSpa += traDistancesSpa.T - np.diag(traDistancesSpa.diagonal())
 
+print("计算DTW距离时比较次数：" + str(countNum))
 # =============================使用DBSCAN开始聚类=================================================
 res = []
 for eps in np.arange(0.01, 1, 0.01):
     for min_samples in range(2, 10):
         dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
         label = dbscan.fit(np.array(traDistances)).labels_
+        try:
+            score = silhouette_score(np.array(traDistancesSpa), label, metric='precomputed')
+        except ValueError:
+            score = -1
         n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
         # print("聚类个数：", n_clusters)
         # 异常点的个数
@@ -132,15 +155,56 @@ for eps in np.arange(0.01, 1, 0.01):
         # print("异常航迹个数：", outLiners)
         # 统计每个簇的样本个数
         stats = pd.Series([i for i in dbscan.labels_ if i != -1]).value_counts().values
+        # score = -1
+        # if stats.size > 2:
+        #     traDistancesSC = []
+        #     labelSC = []
+        #     for i in range(len(label)):
+        #         line = []
+        #         if label[i] == -1:
+        #             continue
+        #         for j in range(len(label)):
+        #             if not label[i] == -1 and not label[j] == -1:
+        #                 line.append(traDistances[i][j])
+        #         traDistancesSC.append(line)
+        #     for i in range(len(label)):
+        #         if not label[i] == -1:
+        #             labelSC.append(label[i])
+        #     score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
         res.append(
-            {'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outLiners, 'stats': stats})
+            {'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outLiners, 'stats': stats,
+             'score': score})
 # 将迭代后的结果存储到数据框中
 df = pd.DataFrame(res)
 
-eps = 0.68
-min_samples = 6
+# 对比试验参数
+# eps = 0.21
+# min_samples = 5
+# 真实实验参数
+eps = 0.27
+min_samples = 5
 dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
 label = dbscan.fit(np.array(traDistances)).labels_
+# 评价聚类的效果
+
+score = silhouette_score(np.array(traDistancesSpa), label, metric='precomputed')
+print("聚类效果SC得分：", score)
+# 去除异常样本的SC得分
+traDistancesSC = []
+labelSC = []
+for i in range(len(label)):
+    line = []
+    if label[i] == -1:
+        continue
+    for j in range(len(label)):
+        if not label[i] == -1 and not label[j] == -1:
+            line.append(traDistancesSpa[i][j])
+    traDistancesSC.append(line)
+for i in range(len(label)):
+    if not label[i] == -1:
+        labelSC.append(label[i])
+score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
+print("去除异常样本聚类效果SC得分：", score)
 n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
 print("聚类个数：", n_clusters)
 # 异常点的个数
@@ -154,11 +218,23 @@ for i in range(len(stats)):
 for i in range(len(trajectories)):
     trajectories[i].label = label[i]
 
+
+# ===================展示不同label船舶的vesselType===================
+for i in range(n_clusters):
+    print("label",i,"的船舶type:")
+    for trajectory in trajectories:
+        if trajectory.label == i:
+            print(trajectory.vesselType,end=",")
+    print()
+
+
 # ===========================================绘图聚类效果===============================
 colors_dict = {-1: 'red', 0: 'green', 1: 'blue', 2: 'cyan', 3: 'purple', 4: 'magenta', 5: 'darksalmon', 6: 'gray',
-               7: 'ivory', 8: 'yellow', 9: 'aqua'}
+               7: 'r', 8: 'pink', 9: 'yellow'}
 fig = plt.figure()
 a1 = fig.add_subplot(111)
+colorLegend = []
+colorIndex = 1
 for trajectory in trajectories:
     dx = []
     dy = []
@@ -171,8 +247,15 @@ for trajectory in trajectories:
     dx = np.array(dx)
     dy = np.array(dy)
     # a1.plot(dx, dy, color=, linestyle='-')
-    a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
-              color=colorLabel, linestyle='-', width=0.003)
+    if colorLegend.__contains__(trajectory.label):
+        a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
+                  color=colorLabel, linestyle='-', width=0.003)
+    else:
+        a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
+                  color=colorLabel, linestyle='-', width=0.003, label="label" + str(colorIndex))
+        colorIndex = colorIndex + 1
+        plt.legend(loc=4)
+        colorLegend.append(trajectory.label)
     plt.plot()
 plt.title("cluster results")
 plt.savefig("cluster results", dpi=1080)

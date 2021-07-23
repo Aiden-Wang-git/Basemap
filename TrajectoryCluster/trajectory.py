@@ -12,6 +12,7 @@ class Trajectory:
     label = -1  # 用于表示航迹属于哪个类
     r = 0.01  # 用于对航迹中环状片段进行删除
     deleteCircleNum = 0  # 用于统计在去环时删除的点个数
+    vesselType = ''  # 用于记录船舶类型
 
     def add_point(self, point):
         self.points.append(point)
@@ -94,6 +95,7 @@ class Trajectory:
         self.points = newPoints
         self.count = len(self.points)
 
-    def __init__(self, MMSI):
+    def __init__(self, MMSI, vesselType):
         self.MMSI = MMSI
         self.points = []
+        self.vesselType = vesselType

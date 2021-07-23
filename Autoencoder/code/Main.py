@@ -724,7 +724,7 @@ def list_add(a, b):
     return c
 
 
-# 根据两个向量，求出它们之间的夹角
+# 根据两个向量，求出它们之间的夹角,返回范围[0,pi]之间
 def angle(vec1, vec2, deg=False):
     _angle = np.arctan2(np.abs(np.cross(vec1, vec2)), np.dot(vec1, vec2))
     if deg:

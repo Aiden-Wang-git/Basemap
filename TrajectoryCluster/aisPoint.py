@@ -23,7 +23,7 @@ class AIS(Base):
     Draft = Column(Float(10),default=0)
     Cargo = Column(Float(10),default=0)
 
-    def __init__(self, ID, MMSI, BaseDateTime, LAT, LON, SOG, COG, Length, Width):
+    def __init__(self, ID, MMSI, BaseDateTime, LAT, LON, SOG, COG, Length, Width,VesselType):
         self.ID = ID
         self.MMSI = MMSI
         self.BaseDateTime = BaseDateTime
@@ -33,4 +33,5 @@ class AIS(Base):
         self.COG = COG
         self.Length = Length
         self.Width = Width
+        self.VesselType = VesselType
 
