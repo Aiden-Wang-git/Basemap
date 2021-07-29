@@ -7,10 +7,15 @@ from TrajectoryCluster.trajectory import Trajectory
 import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
-from TrajectoryCluster.dtw import DTW, DTWSpatialDis
+from TrajectoryCluster.dtw import DTW, DTWSpatialDis,DTWCompare,DTW1,DTWSpatialDisCOM
 import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score  # 计算 轮廓系数，CH 指标，DBI
+from TrajectoryCluster.myHausdorff import hausdorff
+#如遇中文显示问题可加入以下代码
+from pylab import mpl
+mpl.rcParams['font.sans-serif'] = ['SimHei'] # 指定默认字体
+mpl.rcParams['axes.unicode_minus'] = False # 解决保存图像是负号'-'显示为方块的问题
 
 engine = create_engine("mysql+pymysql://root:123456@localhost:3306/ais?charset=utf8")
 # 创建session
@@ -72,6 +77,8 @@ def drawTrajectory(title):
         dy = np.array(dy)
         a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
                   color='r', linestyle='-', width=0.003)
+    plt.xlabel('经度/°')
+    plt.ylabel('纬度/°')
     plt.title(title)
     plt.savefig(title, dpi=1080)
     plt.show()
@@ -96,6 +103,8 @@ print("压缩平均误差：", sum(compressError) / len(compressError))
 df = pd.DataFrame(compressError)
 df.plot.box(title="Compress Error")
 plt.grid(linestyle="--", alpha=0.1)
+plt.xlabel('经度/°')
+plt.ylabel('纬度/°')
 plt.show()
 
 # 航迹压缩后共存在AIS点个数
@@ -124,10 +133,13 @@ for i in range(len(trajectories)):
         traDistance.append(0)
         traDistanceSpa.append(0)
     for j in range(i + 1, len(trajectories)):
-        # 真实实验
-        traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
-        # 对比试验
-        # traDistance.append(DTWCompare(trajectories[i].points, trajectories[j].points))
+        # 本文实验
+        # traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
+        # 混合距离实验
+        # traDistance.append(DTWSpatialDisCOM(trajectories[i].points, trajectories[j].points))
+        # 豪斯多夫距离对比试验
+        traDistance.append(hausdorff(trajectories[i].points, trajectories[j].points))
+        # 计算SC得分需要的度量距离
         traDistanceSpa.append(DTWSpatialDis(trajectories[i].points, trajectories[j].points))
         countNum = countNum + len(trajectories[i].points) * len(trajectories[j].points)
     traDistances.append(traDistance)
@@ -138,51 +150,64 @@ traDistances += traDistances.T - np.diag(traDistances.diagonal())
 traDistancesSpa += traDistancesSpa.T - np.diag(traDistancesSpa.diagonal())
 
 print("计算DTW距离时比较次数：" + str(countNum))
-# =============================使用DBSCAN开始聚类=================================================
-res = []
-for eps in np.arange(0.01, 1, 0.01):
-    for min_samples in range(2, 10):
-        dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
-        label = dbscan.fit(np.array(traDistances)).labels_
-        try:
-            score = silhouette_score(np.array(traDistancesSpa), label, metric='precomputed')
-        except ValueError:
-            score = -1
-        n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
-        # print("聚类个数：", n_clusters)
-        # 异常点的个数
-        outLiners = np.sum(np.where(dbscan.labels_ == -1, 1, 0))
-        # print("异常航迹个数：", outLiners)
-        # 统计每个簇的样本个数
-        stats = pd.Series([i for i in dbscan.labels_ if i != -1]).value_counts().values
-        # score = -1
-        # if stats.size > 2:
-        #     traDistancesSC = []
-        #     labelSC = []
-        #     for i in range(len(label)):
-        #         line = []
-        #         if label[i] == -1:
-        #             continue
-        #         for j in range(len(label)):
-        #             if not label[i] == -1 and not label[j] == -1:
-        #                 line.append(traDistances[i][j])
-        #         traDistancesSC.append(line)
-        #     for i in range(len(label)):
-        #         if not label[i] == -1:
-        #             labelSC.append(label[i])
-        #     score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
-        res.append(
-            {'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outLiners, 'stats': stats,
-             'score': score})
-# 将迭代后的结果存储到数据框中
-df = pd.DataFrame(res)
 
-# 对比试验参数
-# eps = 0.21
-# min_samples = 5
-# 真实实验参数
-eps = 0.27
+
+
+#=========================测试聚类时参数===================
+# res = []
+# for eps in np.arange(0.001, 0.02, 0.0002):
+#     for min_samples in range(2, 10):
+#         dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
+#         label = dbscan.fit(np.array(traDistances)).labels_
+#         try:
+#             score = silhouette_score(np.array(traDistancesSpa), label, metric='precomputed')
+#         except ValueError:
+#             score = -1
+#         n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
+#         # print("聚类个数：", n_clusters)
+#         # 异常点的个数
+#         outLiners = np.sum(np.where(dbscan.labels_ == -1, 1, 0))
+#         # print("异常航迹个数：", outLiners)
+#         # 统计每个簇的样本个数
+#         stats = pd.Series([i for i in dbscan.labels_ if i != -1]).value_counts().values
+#         score = -1
+#         if stats.size > 2:
+#             traDistancesSC = []
+#             labelSC = []
+#             for i in range(len(label)):
+#                 line = []
+#                 if label[i] == -1:
+#                     continue
+#                 for j in range(len(label)):
+#                     if not label[i] == -1 and not label[j] == -1:
+#                         line.append(traDistances[i][j])
+#                 traDistancesSC.append(line)
+#             for i in range(len(label)):
+#                 if not label[i] == -1:
+#                     labelSC.append(label[i])
+#             score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
+#         res.append(
+#             {'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outLiners, 'stats': stats,
+#              'score': score})
+# # 将迭代后的结果存储到数据框中
+# df = pd.DataFrame(res)
+
+
+
+
+
+# =============================使用DBSCAN开始聚类=================================================
+# 豪斯多夫距离对比试验
+
+
+eps = 0.0122
 min_samples = 5
+# 混合距离对比试验参数
+# eps = 0.17
+# min_samples = 6
+# 真实实验参数
+# eps = 0.27
+# min_samples = 5
 dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
 label = dbscan.fit(np.array(traDistances)).labels_
 # 评价聚类的效果
@@ -235,6 +260,10 @@ fig = plt.figure()
 a1 = fig.add_subplot(111)
 colorLegend = []
 colorIndex = 1
+# a1.set_ylim(bottom=33.55)
+# a1.set_ylim(top=33.65)
+# a1.set_xlim(left=-118.30)
+# a1.set_xlim(right=-118.20)
 for trajectory in trajectories:
     dx = []
     dy = []
@@ -257,8 +286,10 @@ for trajectory in trajectories:
         plt.legend(loc=4)
         colorLegend.append(trajectory.label)
     plt.plot()
-plt.title("cluster results")
-plt.savefig("cluster results", dpi=1080)
+plt.xlabel('经度/°')
+plt.ylabel('纬度/°')
+plt.title("cluster result")
+# plt.savefig("cluster results", dpi=1080)
 plt.show()
 
 print("结束！")
