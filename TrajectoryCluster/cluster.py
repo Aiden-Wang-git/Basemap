@@ -7,15 +7,16 @@ from TrajectoryCluster.trajectory import Trajectory
 import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
-from TrajectoryCluster.dtw import DTW, DTWSpatialDis,DTWCompare,DTW1,DTWSpatialDisCOM
+from TrajectoryCluster.dtw import DTW, DTWSpatialDis, DTWCompare, DTW1, DTWSpatialDisCOM
 import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score  # 计算 轮廓系数，CH 指标，DBI
 from TrajectoryCluster.myHausdorff import hausdorff
-#如遇中文显示问题可加入以下代码
+# 如遇中文显示问题可加入以下代码
 from pylab import mpl
-mpl.rcParams['font.sans-serif'] = ['SimHei'] # 指定默认字体
-mpl.rcParams['axes.unicode_minus'] = False # 解决保存图像是负号'-'显示为方块的问题
+
+mpl.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体
+mpl.rcParams['axes.unicode_minus'] = False  # 解决保存图像是负号'-'显示为方块的问题
 
 engine = create_engine("mysql+pymysql://root:123456@localhost:3306/ais?charset=utf8")
 # 创建session
@@ -46,7 +47,7 @@ session.close()
 MMSI = datas[0].MMSI
 vesselType = datas[0].VesselType
 trajectories = []
-trajectory = Trajectory(MMSI,vesselType)
+trajectory = Trajectory(MMSI, vesselType)
 for data in datas:
     if data.MMSI == MMSI:
         if trajectory.getLength() == 0 or \
@@ -57,7 +58,7 @@ for data in datas:
         trajectories.append(trajectory)
     MMSI = data.MMSI
     vesselType = data.VesselType
-    trajectory = Trajectory(MMSI,vesselType)
+    trajectory = Trajectory(MMSI, vesselType)
     trajectory.add_point(data)
 print("共有轨迹条数：", len(trajectories))
 
@@ -79,8 +80,8 @@ def drawTrajectory(title):
                   color='r', linestyle='-', width=0.003)
     plt.xlabel('经度/°')
     plt.ylabel('纬度/°')
-    plt.title(title)
-    plt.savefig(title, dpi=1080)
+    # plt.title(title)
+    plt.savefig(title, dpi=1080, bbox_inches='tight')
     plt.show()
 
 
@@ -97,7 +98,7 @@ print("压缩前共有AIS点：", aisNumBefore)
 compressError = []
 for trajectory in trajectories:
     trajectory.compress(trajectory.points[0], trajectory.points[trajectory.count - 1])
-    trajectory.deleteCircle()
+    # trajectory.deleteCircle()
     compressError.append(trajectory.error / trajectory.deleteNum)
 print("压缩平均误差：", sum(compressError) / len(compressError))
 df = pd.DataFrame(compressError)
@@ -134,11 +135,11 @@ for i in range(len(trajectories)):
         traDistanceSpa.append(0)
     for j in range(i + 1, len(trajectories)):
         # 本文实验
-        # traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
+        traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
         # 混合距离实验
         # traDistance.append(DTWSpatialDisCOM(trajectories[i].points, trajectories[j].points))
         # 豪斯多夫距离对比试验
-        traDistance.append(hausdorff(trajectories[i].points, trajectories[j].points))
+        # traDistance.append(hausdorff(trajectories[i].points, trajectories[j].points))
         # 计算SC得分需要的度量距离
         traDistanceSpa.append(DTWSpatialDis(trajectories[i].points, trajectories[j].points))
         countNum = countNum + len(trajectories[i].points) * len(trajectories[j].points)
@@ -151,9 +152,7 @@ traDistancesSpa += traDistancesSpa.T - np.diag(traDistancesSpa.diagonal())
 
 print("计算DTW距离时比较次数：" + str(countNum))
 
-
-
-#=========================测试聚类时参数===================
+# =========================测试聚类时参数===================
 # res = []
 # for eps in np.arange(0.001, 0.02, 0.0002):
 #     for min_samples in range(2, 10):
@@ -193,21 +192,18 @@ print("计算DTW距离时比较次数：" + str(countNum))
 # df = pd.DataFrame(res)
 
 
-
-
-
 # =============================使用DBSCAN开始聚类=================================================
 # 豪斯多夫距离对比试验
 
-
-eps = 0.0122
-min_samples = 5
+# 豪斯多夫聚类参数
+# eps = 0.0122
+# min_samples = 5
 # 混合距离对比试验参数
 # eps = 0.17
 # min_samples = 6
 # 真实实验参数
-# eps = 0.27
-# min_samples = 5
+eps = 0.27
+min_samples = 5
 dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
 label = dbscan.fit(np.array(traDistances)).labels_
 # 评价聚类的效果
@@ -243,15 +239,13 @@ for i in range(len(stats)):
 for i in range(len(trajectories)):
     trajectories[i].label = label[i]
 
-
 # ===================展示不同label船舶的vesselType===================
 for i in range(n_clusters):
-    print("label",i,"的船舶type:")
+    print("label", i, "的船舶type:")
     for trajectory in trajectories:
         if trajectory.label == i:
-            print(trajectory.vesselType,end=",")
+            print(trajectory.vesselType, end=",")
     print()
-
 
 # ===========================================绘图聚类效果===============================
 colors_dict = {-1: 'red', 0: 'green', 1: 'blue', 2: 'cyan', 3: 'purple', 4: 'magenta', 5: 'darksalmon', 6: 'gray',
@@ -260,10 +254,11 @@ fig = plt.figure()
 a1 = fig.add_subplot(111)
 colorLegend = []
 colorIndex = 1
-# a1.set_ylim(bottom=33.55)
-# a1.set_ylim(top=33.65)
-# a1.set_xlim(left=-118.30)
-# a1.set_xlim(right=-118.20)
+a1 = fig.add_subplot(111)
+a1.set_ylim(bottom=33.55)
+a1.set_ylim(top=33.65)
+a1.set_xlim(left=-118.30)
+a1.set_xlim(right=-118.20)
 for trajectory in trajectories:
     dx = []
     dy = []
@@ -275,7 +270,7 @@ for trajectory in trajectories:
         dy.append(point.LAT)
     dx = np.array(dx)
     dy = np.array(dy)
-    # a1.plot(dx, dy, color=, linestyle='-')
+    a1.plot(dx, dy, color=colorLabel, linestyle='-')
     if colorLegend.__contains__(trajectory.label):
         a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
                   color=colorLabel, linestyle='-', width=0.003)
@@ -288,8 +283,40 @@ for trajectory in trajectories:
     plt.plot()
 plt.xlabel('经度/°')
 plt.ylabel('纬度/°')
-plt.title("cluster result")
-# plt.savefig("cluster results", dpi=1080)
+plt.title("label")
+plt.savefig("cluster results", dpi=1080, bbox_inches='tight')
 plt.show()
+
+
+# 分别展示不同label的航迹
+# for aaa in range(len(colorLegend)):
+#     fig = plt.figure()
+#     a1 = fig.add_subplot(111)
+#     a1.set_ylim(bottom=33.55)
+#     a1.set_ylim(top=33.65)
+#     a1.set_xlim(left=-118.30)
+#     a1.set_xlim(right=-118.20)
+#     for trajectory in trajectories:
+#         dx = []
+#         dy = []
+#         colorLabel = colors_dict[trajectory.label]
+#         if aaa != trajectory.label:
+#             continue
+#         for point in trajectory.points:
+#             dx.append(point.LON)
+#             dy.append(point.LAT)
+#         dx = np.array(dx)
+#         dy = np.array(dy)
+#         # a1.plot(dx, dy, color=, linestyle='-')
+#         if colorLegend.__contains__(trajectory.label):
+#             a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
+#                       color=colorLabel, linestyle='-', width=0.003)
+#         plt.plot()
+#     plt.xlabel('经度/°')
+#     plt.ylabel('纬度/°')
+#     plt.title("label"+str(aaa+1))
+#     plt.savefig("cluster results"+str(aaa), dpi=1080, bbox_inches='tight')
+#     print("label"+str(aaa)+"绘图完成。。。。。")
+#     # plt.show()
 
 print("结束！")
