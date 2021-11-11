@@ -4,7 +4,7 @@ from TrajectoryCluster.aisPoint import AIS
 from sqlalchemy import and_
 from sqlalchemy import func
 from TrajectoryCluster.trajectory import Trajectory
-import datetime
+import time
 import matplotlib.pyplot as plt
 import pandas as pd
 from TrajectoryCluster.dtw import DTW, DTWSpatialDis, DTWCompare, DTW1, DTWSpatialDisCOM
@@ -30,6 +30,8 @@ session = DbSession()
 # testAIS = session.query(AIS).filter(AIS.MMSI=='王军号MMSI').one()
 # print("type:",type(testAIS))
 # print("生日",testAIS.BaseDateTime)
+
+
 
 # ================================航迹提取=============================
 # 读取研究范围内所有航速大于1的AIS点
@@ -120,6 +122,9 @@ drawTrajectory("After Compress")
 
 # print(len(datas))
 
+# ================================程序开始时间=========================
+startTime = time.time()
+
 # ===================================调用DTW计算航迹之间的距离======================================
 # 保存航迹距离
 traDistances = []
@@ -135,11 +140,11 @@ for i in range(len(trajectories)):
         traDistanceSpa.append(0)
     for j in range(i + 1, len(trajectories)):
         # 本文实验
-        traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
+        # traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
         # 混合距离实验
         # traDistance.append(DTWSpatialDisCOM(trajectories[i].points, trajectories[j].points))
         # 豪斯多夫距离对比试验
-        # traDistance.append(hausdorff(trajectories[i].points, trajectories[j].points))
+        traDistance.append(hausdorff(trajectories[i].points, trajectories[j].points))
         # 计算SC得分需要的度量距离
         traDistanceSpa.append(DTWSpatialDis(trajectories[i].points, trajectories[j].points))
         countNum = countNum + len(trajectories[i].points) * len(trajectories[j].points)
@@ -149,8 +154,9 @@ traDistances = np.triu(np.array(traDistances))
 traDistancesSpa = np.triu(np.array(traDistancesSpa))
 traDistances += traDistances.T - np.diag(traDistances.diagonal())
 traDistancesSpa += traDistancesSpa.T - np.diag(traDistancesSpa.diagonal())
-
 print("计算DTW距离时比较次数：" + str(countNum))
+
+
 
 # =========================测试聚类时参数===================
 # res = []
@@ -193,20 +199,22 @@ print("计算DTW距离时比较次数：" + str(countNum))
 
 
 # =============================使用DBSCAN开始聚类=================================================
-# 豪斯多夫距离对比试验
-
 # 豪斯多夫聚类参数
-# eps = 0.0122
-# min_samples = 5
+eps = 0.006
+min_samples = 4
 # 混合距离对比试验参数
 # eps = 0.17
 # min_samples = 6
 # 真实实验参数
-eps = 0.27
-min_samples = 5
+# eps = 0.27
+# min_samples = 5
 dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
 label = dbscan.fit(np.array(traDistances)).labels_
 # 评价聚类的效果
+
+# =====================================程序结束时间==========================
+endTime = time.time()
+
 
 score = silhouette_score(np.array(traDistancesSpa), label, metric='precomputed')
 print("聚类效果SC得分：", score)
@@ -283,10 +291,9 @@ for trajectory in trajectories:
     plt.plot()
 plt.xlabel('经度/°')
 plt.ylabel('纬度/°')
-plt.title("label")
+# plt.title("label")
 plt.savefig("cluster results", dpi=1080, bbox_inches='tight')
 plt.show()
-
 
 # 分别展示不同label的航迹
 # for aaa in range(len(colorLegend)):
@@ -319,4 +326,6 @@ plt.show()
 #     print("label"+str(aaa)+"绘图完成。。。。。")
 #     # plt.show()
 
+
 print("结束！")
+print("共用时",str(endTime-startTime))
