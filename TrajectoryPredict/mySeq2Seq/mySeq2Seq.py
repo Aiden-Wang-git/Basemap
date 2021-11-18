@@ -15,19 +15,27 @@ learning_rate = 0.01
 lambda_l2_reg = 0.003
 # Network Parameters
 # length of input signals
-input_seq_len = 15
+input_seq_len = 10
 # length of output signals
-output_seq_len = 20
+output_seq_len = 5
 # size of LSTM Cell
 hidden_dim = 64
 # num of input signals
-input_dim = 1
+input_dim = 4
 # num of output signals
-output_dim = 1
+output_dim = 4
 # num of stacked lstm layers
 num_stacked_layers = 2
 # gradient clipping - to avoid gradient exploding
 GRADIENT_CLIPPING = 2.5
+
+datas = {}
+
+
+# 1.读入数据集
+def mySeq2Seq2_train(data_dict):
+    global datas
+    datas = data_dict
 
 
 # 这里的seq2seq模型基本与tensorflow在github中提供的模型一致。
@@ -204,4 +212,91 @@ def build_graph(feed_previous=False):
         saver=saver,
         reshaped_outputs=reshaped_outputs,
     )
+
+
+# 此处用于封装数据，满足Seq2Seq的输入、输出格式，并且每条航迹训练batch_size次
+def generate_train_samples(data, batch_size):
+    # 用于封装自己需要的四个要素
+    X = []
+    for point in data:
+        X.append([point.LAT, point.LON, point.SOG, point.COG])
+    # 用于保存AIS点的下标
+    x = [i for i in range(len(X))]
+    # 这个地方是start_point的index,也就是说小于等于index的点都可以作为起点
+    total_start_points = len(x) - input_seq_len - output_seq_len
+    # 随机选取10个起始点
+    start_x_idx = np.random.choice(range(total_start_points), batch_size)
+    # 获取这10个起始点的输入X，输出X
+    input_seq_x = [x[i:(i + input_seq_len)] for i in start_x_idx]
+    output_seq_x = [x[(i + input_seq_len):(i + input_seq_len + output_seq_len)] for i in start_x_idx]
+    # 获取带噪声的对应Y值，作为输入、输出
+    input_seq_y = []
+    output_seq_y = []
+    for i in input_seq_x:
+        list1 = []
+        for j in i:
+            list1.append(X[j])
+        input_seq_y.append(list1)
+    for i in output_seq_x:
+        list1 = []
+        for j in i:
+            list1.append(X[j])
+        output_seq_y.append(list1)
+    return np.array(input_seq_y), np.array(output_seq_y)
+
+
+# 2.训练模型
+def train_seq2seq_model():
+    total_iteractions = 100
+    batch_size = 10
+    KEEP_RATE = 0.5
+    train_losses = []
+    val_losses = []
+    rnn_model = build_graph(feed_previous=False)
+    saver = tf.train.Saver()
+    init = tf.global_variables_initializer()
+    with tf.Session() as sess:
+        sess.run(init)
+        for i in range(total_iteractions):
+            for key in datas:
+                data = datas[key]
+                batch_input, batch_output = generate_train_samples(data=data, batch_size=batch_size)
+                feed_dict = {rnn_model['enc_inp'][t]: batch_input[:, t].reshape(-1, input_dim) for t in
+                             range(input_seq_len)}
+                feed_dict.update(
+                    {rnn_model['target_seq'][t]: batch_output[:, t].reshape(-1, output_dim) for t in
+                     range(output_seq_len)})
+                _, loss_t = sess.run([rnn_model['train_op'], rnn_model['loss']], feed_dict)
+            print(f'第{i}次迭代，loss函数：{loss_t}')
+        temp_saver = rnn_model['saver']()
+        save_path = temp_saver.save(sess, os.path.join('./', 'univariate_ts_model0'))
+    print("model saved at: ", save_path)
+
+
+# 3.预测
+def model_predict(predict_tra):
+    test_tra = []
+    for tra in predict_tra:
+        test_tra.append([tra.LAT, tra.LON, tra.SOG, tra.COG])
+    test_tra = np.array(test_tra)
+    test_seq_input = test_tra[10:10 + input_seq_len]
+    test_seq_out = test_tra[10 + input_seq_len:10 + input_seq_len + output_seq_len]
+    rnn_model = build_graph(feed_previous=True)
+    init = tf.global_variables_initializer()
+    with tf.Session() as sess:
+        sess.run(init)
+        saver = rnn_model['saver']().restore(sess, os.path.join('./', 'univariate_ts_model0'))
+        feed_dict = {rnn_model['enc_inp'][t]: test_seq_input[t].reshape(1, input_dim) for t in range(input_seq_len)}
+        feed_dict.update({rnn_model['target_seq'][t]: np.zeros([1, output_dim]) for t in range(output_seq_len)})
+        final_preds = sess.run(rnn_model['reshaped_outputs'], feed_dict)
+        final_preds = np.concatenate(final_preds, axis=1)
+    # 得到的预测效果如下：
+    final_preds = final_preds.reshape(-1,4)
+    # 经度
+    l1, = plt.plot(range(input_seq_len), np.array([i[0] for i in test_tra[10:10+input_seq_len]]).reshape(-1), label='History')
+    l2, = plt.plot(range(input_seq_len,input_seq_len+output_seq_len), np.array([i[0] for i in test_seq_out]).reshape(-1), 'yo', label='Truth')
+    l3, = plt.plot(range(input_seq_len,input_seq_len+output_seq_len), np.array([i[0] for i in final_preds]).reshape(-1), 'ro', label='Predictions')
+    plt.legend(handles=[l1, l2, l3], loc='lower left')
+    plt.title('LAT')
+    plt.show()
 

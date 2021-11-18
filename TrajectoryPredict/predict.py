@@ -15,7 +15,7 @@ from TrajectoryCluster.myHausdorff import hausdorff
 from pylab import mpl
 from geopy.distance import geodesic
 from math import radians, cos, sin, asin, sqrt
-
+from TrajectoryPredict.mySeq2Seq.mySeq2Seq import *
 # ========================全文种使用到的参数==============================
 
 # ===================从数据库中查询数据的条件=============================
@@ -24,7 +24,7 @@ bottom = 33.55
 left = -118.30
 right = -118.20
 begin = '2017-01-01'
-end = '2018-01-01'
+end = '2017-02-01'
 
 # ===================航迹预处理的条件=============================
 # 一条航迹中至少包含AIS点数目
@@ -136,3 +136,13 @@ def getDistance(pointA, pointB):
 trajectories = getRawTrajectory(top=top, bottom=bottom, left=left, right=right, begin=begin, end=end)
 trajectories_process1 = process1(trajectories=trajectories)
 trajectories_process2 = process2(trajectories_process1=trajectories_process1)
+
+mySeq2Seq2_train(trajectories_process2)
+
+# 预测用例船舶MMSI
+test1 = '367580930-24'
+test2 = '367724740-0'
+test3 = '367719640-4'
+test4 = '367719640-31'
+
+model_predict(trajectories_process2[test1])
