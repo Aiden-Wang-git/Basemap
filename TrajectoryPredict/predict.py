@@ -15,7 +15,19 @@ from TrajectoryCluster.myHausdorff import hausdorff
 from pylab import mpl
 from geopy.distance import geodesic
 from math import radians, cos, sin, asin, sqrt
+
+from TrajectoryPredict.interpolation import interpolation3
 from TrajectoryPredict.mySeq2Seq.mySeq2Seq import *
+from random import randint
+from numpy import array
+from numpy import argmax
+from numpy import array_equal
+from keras.utils import to_categorical
+from keras.models import Model
+from keras.layers import Input
+from keras.layers import LSTM
+from keras.layers import Dense
+
 # ========================全文种使用到的参数==============================
 
 # ===================从数据库中查询数据的条件=============================
@@ -31,8 +43,20 @@ end = '2017-02-01'
 min_num_in_trajectory = 35
 # 相邻AIS点之间的时间阈值,单位S
 max_time_between_AIS = 1800
-# ==================最大航速35节，通过数据估计的====================
-max_sog = 33
+# ===================船舶label和SOG阈值对应关系=====================
+max_sog = {
+    '1012': 33,  # 客船
+    '1010': 19,  # 近海船
+    '40': 34,  # 快艇
+    '1004': 14,  # 货船
+    '1005': 26,  # 工业船
+    '1025': 13,  # 拖船
+    '1024': 15,  # 油轮
+    '1001': 19,  # 渔船
+    '1019': 30,  # 游船
+    '31': 9,  # 拖船（此类拖船航迹数目较少，整个数据库才14K条数据，可以考虑删除或者和1025合并）
+
+}
 
 # ====================画图时，如遇中文显示问题可加入以下代码============
 mpl.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体
@@ -54,7 +78,9 @@ def getRawTrajectory(top, bottom, left, right, begin, end):
              AIS.LON <= right,
              AIS.SOG >= 1,
              AIS.BaseDateTime >= begin,
-             AIS.BaseDateTime <= end)).order_by(AIS.BaseDateTime).all()
+             AIS.BaseDateTime <= end,
+             AIS.VesselType.in_(list(max_sog.keys())))
+    ).order_by(AIS.BaseDateTime).all()
     session.close()
     trajectories = {}
     for data in datas:
@@ -80,7 +106,7 @@ def process1(trajectories):
         else:
             # 找到分割点
             for i in range(len(trajectory) - 1):
-                if (trajectory[i + 1].BaseDateTime - trajectory[i].BaseDateTime).seconds > max_time_between_AIS:
+                if (trajectory[i + 1].BaseDateTime - trajectory[i].BaseDateTime).total_seconds() > max_time_between_AIS:
                     split_time.append(i + 1)
             # 往新的字典中添加数据
             if len(split_time) > 1:
@@ -97,18 +123,28 @@ def process1(trajectories):
 
 # 处理位置异常点，以及航速大于35节的点
 def process2(trajectories_process1):
+    # 用于统计数据中SOG超标数量
     count1 = 0
+    # 用于统计根据实际位置SOG超标数量
     count2 = 0
-    for key in trajectories:
-        trajectory = trajectories[key]
+    # 用于记录需要插值的时间点
+    for key in trajectories_process1:
+        timestamp = []
+        trajectory = trajectories_process1[key]
+        max_sog_now = max_sog[trajectory[0].VesselType]
+        start_time = trajectory[0].BaseDateTime
         for i in range(1, len(trajectory) - 1):
-            if trajectory[i].SOG > max_sog:
+            if trajectory[i].SOG > max_sog_now:
                 count1 += 1
+                timestamp.append((trajectory[i].BaseDateTime - start_time).total_seconds())
             elif getDistance(trajectory[i], trajectory[i + 1]) / (
-                    trajectory[i + 1].BaseDateTime - trajectory[i].BaseDateTime).seconds * 3600 > 1.852 * max_sog \
+                    trajectory[i + 1].BaseDateTime - trajectory[i].BaseDateTime).total_seconds() * 3600 > 1.852 * max_sog_now \
                     or getDistance(trajectory[i - 1], trajectory[i]) / (
-                    trajectory[i].BaseDateTime - trajectory[i - 1].BaseDateTime).seconds * 3600 > 1.852 * max_sog:
+                    trajectory[i].BaseDateTime - trajectory[i - 1].BaseDateTime).total_seconds() * 3600 > 1.852 * max_sog_now:
                 count2 += 1
+                timestamp.append((trajectory[i].BaseDateTime - start_time).total_seconds())
+        if len(timestamp)>0:
+            interpolation3(trajectory=trajectory, inter_time=timestamp)
     print(f"经过process2之后,AIS点超速count1:{count1}个")
     print(f"经过process2之后,AIS点异常count2:{count2}个")
     return trajectories_process1
@@ -132,17 +168,51 @@ def getDistance(pointA, pointB):
     return distance
 
 
+# 构造Seq2Seq训练模型model, 以及进行新序列预测时需要的的Encoder模型:encoder_model 与Decoder模型:decoder_model
+def define_models(n_input, n_output, n_units):
+    # 训练模型中的encoder
+    encoder_inputs = Input(shape=(None, n_input))
+    encoder = LSTM(n_units, return_state=True)
+    encoder_outputs, state_h, state_c = encoder(encoder_inputs)
+    encoder_states = [state_h, state_c]  # 仅保留编码状态向量
+    # 训练模型中的decoder
+    decoder_inputs = Input(shape=(None, n_output))
+    decoder_lstm = LSTM(n_units, return_sequences=True, return_state=True)
+    decoder_outputs, _, _ = decoder_lstm(decoder_inputs, initial_state=encoder_states)
+    decoder_dense = Dense(n_output, activation='softmax')
+    decoder_outputs = decoder_dense(decoder_outputs)
+    model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
+    # 新序列预测时需要的encoder
+    encoder_model = Model(encoder_inputs, encoder_states)
+    # 新序列预测时需要的decoder
+    decoder_state_input_h = Input(shape=(n_units,))
+    decoder_state_input_c = Input(shape=(n_units,))
+    decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
+    decoder_outputs, state_h, state_c = decoder_lstm(decoder_inputs, initial_state=decoder_states_inputs)
+    decoder_states = [state_h, state_c]
+    decoder_outputs = decoder_dense(decoder_outputs)
+    decoder_model = Model([decoder_inputs] + decoder_states_inputs, [decoder_outputs] + decoder_states)
+    # 返回需要的三个模型
+    return model, encoder_model, decoder_model
+
+
 # ==================================主函数部分==========================================
+
+# =============================第一章：航迹数据的预处理===================================
 trajectories = getRawTrajectory(top=top, bottom=bottom, left=left, right=right, begin=begin, end=end)
 trajectories_process1 = process1(trajectories=trajectories)
 trajectories_process2 = process2(trajectories_process1=trajectories_process1)
 
-mySeq2Seq2_train(trajectories_process2)
-
+# =============================第四章：seq2seq预测=======================================
+data_to_seq2seq(trajectories_process2)
+# 训练模型
+# train_seq2seq_model()
 # 预测用例船舶MMSI
 test1 = '367580930-24'
 test2 = '367724740-0'
 test3 = '367719640-4'
 test4 = '367719640-31'
-
 model_predict(trajectories_process2[test1])
+model_predict(trajectories_process2[test2])
+model_predict(trajectories_process2[test3])
+model_predict(trajectories_process2[test4])

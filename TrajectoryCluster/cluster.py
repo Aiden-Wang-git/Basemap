@@ -142,9 +142,9 @@ for i in range(len(trajectories)):
         # 本文实验
         # traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
         # 混合距离实验
-        # traDistance.append(DTWSpatialDisCOM(trajectories[i].points, trajectories[j].points))
+        traDistance.append(DTWSpatialDisCOM(trajectories[i].points, trajectories[j].points))
         # 豪斯多夫距离对比试验
-        traDistance.append(hausdorff(trajectories[i].points, trajectories[j].points))
+        # traDistance.append(hausdorff(trajectories[i].points, trajectories[j].points))
         # 计算SC得分需要的度量距离
         traDistanceSpa.append(DTWSpatialDis(trajectories[i].points, trajectories[j].points))
         countNum = countNum + len(trajectories[i].points) * len(trajectories[j].points)
@@ -160,7 +160,7 @@ print("计算DTW距离时比较次数：" + str(countNum))
 
 # =========================测试聚类时参数===================
 # res = []
-# for eps in np.arange(0.001, 0.02, 0.0002):
+# for eps in np.arange(0.01, 1, 0.01):
 #     for min_samples in range(2, 10):
 #         dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
 #         label = dbscan.fit(np.array(traDistances)).labels_
@@ -200,11 +200,11 @@ print("计算DTW距离时比较次数：" + str(countNum))
 
 # =============================使用DBSCAN开始聚类=================================================
 # 豪斯多夫聚类参数
-eps = 0.006
-min_samples = 4
+# eps = 0.006
+# min_samples = 4
 # 混合距离对比试验参数
-# eps = 0.17
-# min_samples = 6
+eps = 0.16
+min_samples = 6
 # 真实实验参数
 # eps = 0.27
 # min_samples = 5

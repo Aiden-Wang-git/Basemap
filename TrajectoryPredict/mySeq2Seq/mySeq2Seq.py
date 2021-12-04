@@ -8,6 +8,7 @@ import copy
 from tensorflow.contrib import rnn
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.framework import dtypes
+from sklearn import preprocessing
 
 # 模型参数设置
 # Parameters
@@ -21,21 +22,38 @@ output_seq_len = 5
 # size of LSTM Cell
 hidden_dim = 64
 # num of input signals
-input_dim = 4
+input_dim = 5
 # num of output signals
-output_dim = 4
+output_dim = 5
 # num of stacked lstm layers
 num_stacked_layers = 2
 # gradient clipping - to avoid gradient exploding
 GRADIENT_CLIPPING = 2.5
 
-datas = {}
-
-
+# 用于保存传入的航迹数据
+datas = []
+# 用于数据的归一化
+scaler = object
 # 1.读入数据集
-def mySeq2Seq2_train(data_dict):
+def data_to_seq2seq(data_dict):
     global datas
-    datas = data_dict
+    train_data = []
+    scaler_data = []
+    for key in data_dict:
+        trajectory = data_dict[key]
+        X = []
+        for i in range(1,len(trajectory)):
+            point = trajectory[i]
+            temp = [point.LAT, point.LON, point.SOG, point.COG,
+                    (trajectory[i].BaseDateTime - trajectory[i - 1].BaseDateTime).seconds]
+            X.append(temp)
+            scaler_data.append(temp)
+        train_data.append(X)
+    global scaler
+    scaler = scaler = preprocessing.MinMaxScaler().fit(scaler_data)
+    train_data_temp = train_data
+    for data in train_data_temp:
+        datas.append(scaler.transform(data))
 
 
 # 这里的seq2seq模型基本与tensorflow在github中提供的模型一致。
@@ -216,12 +234,8 @@ def build_graph(feed_previous=False):
 
 # 此处用于封装数据，满足Seq2Seq的输入、输出格式，并且每条航迹训练batch_size次
 def generate_train_samples(data, batch_size):
-    # 用于封装自己需要的四个要素
-    X = []
-    for point in data:
-        X.append([point.LAT, point.LON, point.SOG, point.COG])
     # 用于保存AIS点的下标
-    x = [i for i in range(len(X))]
+    x = [i for i in range(len(data))]
     # 这个地方是start_point的index,也就是说小于等于index的点都可以作为起点
     total_start_points = len(x) - input_seq_len - output_seq_len
     # 随机选取10个起始点
@@ -235,12 +249,12 @@ def generate_train_samples(data, batch_size):
     for i in input_seq_x:
         list1 = []
         for j in i:
-            list1.append(X[j])
+            list1.append(data[j])
         input_seq_y.append(list1)
     for i in output_seq_x:
         list1 = []
         for j in i:
-            list1.append(X[j])
+            list1.append(data[j])
         output_seq_y.append(list1)
     return np.array(input_seq_y), np.array(output_seq_y)
 
@@ -258,9 +272,8 @@ def train_seq2seq_model():
     with tf.Session() as sess:
         sess.run(init)
         for i in range(total_iteractions):
-            for key in datas:
-                data = datas[key]
-                batch_input, batch_output = generate_train_samples(data=data, batch_size=batch_size)
+            for trajectory in datas:
+                batch_input, batch_output = generate_train_samples(data=trajectory, batch_size=batch_size)
                 feed_dict = {rnn_model['enc_inp'][t]: batch_input[:, t].reshape(-1, input_dim) for t in
                              range(input_seq_len)}
                 feed_dict.update(
@@ -276,10 +289,19 @@ def train_seq2seq_model():
 # 3.预测
 def model_predict(predict_tra):
     test_tra = []
-    for tra in predict_tra:
-        test_tra.append([tra.LAT, tra.LON, tra.SOG, tra.COG])
+    for i in range(len(predict_tra)):
+        point = predict_tra[i]
+        temp = [point.LAT, point.LON, point.SOG, point.COG]
+        if i == 0:
+            temp.append(0)
+        else:
+            temp.append((predict_tra[i].BaseDateTime-predict_tra[i-1].BaseDateTime).seconds)
+        test_tra.append(temp)
+    # for tra in predict_tra:
+    #     test_tra.append([tra.LAT, tra.LON, tra.SOG, tra.COG])
     test_tra = np.array(test_tra)
     test_seq_input = test_tra[10:10 + input_seq_len]
+    test_seq_input = scaler.transform(test_seq_input)
     test_seq_out = test_tra[10 + input_seq_len:10 + input_seq_len + output_seq_len]
     rnn_model = build_graph(feed_previous=True)
     init = tf.global_variables_initializer()
@@ -291,7 +313,8 @@ def model_predict(predict_tra):
         final_preds = sess.run(rnn_model['reshaped_outputs'], feed_dict)
         final_preds = np.concatenate(final_preds, axis=1)
     # 得到的预测效果如下：
-    final_preds = final_preds.reshape(-1,4)
+    final_preds = final_preds.reshape(-1,output_dim)
+    final_preds = scaler.inverse_transform(final_preds)
     # 经度
     l1, = plt.plot(range(input_seq_len), np.array([i[0] for i in test_tra[10:10+input_seq_len]]).reshape(-1), label='History')
     l2, = plt.plot(range(input_seq_len,input_seq_len+output_seq_len), np.array([i[0] for i in test_seq_out]).reshape(-1), 'yo', label='Truth')
