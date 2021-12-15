@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score  # 计算 轮廓系数，CH 指标，DBI
 from TrajectoryCluster.myHausdorff import hausdorff
-from pylab import mpl
+from pylab import mpl, datetime
 from geopy.distance import geodesic
 from math import radians, cos, sin, asin, sqrt
 
@@ -36,13 +36,15 @@ bottom = 33.55
 left = -118.30
 right = -118.20
 begin = '2017-01-01'
-end = '2017-02-01'
+end = '2018-01-01'
 
 # ===================航迹预处理的条件=============================
 # 一条航迹中至少包含AIS点数目
 min_num_in_trajectory = 35
 # 相邻AIS点之间的时间阈值,单位S
 max_time_between_AIS = 1800
+# 插值间隔，如果一条航迹中相邻点时间差大于该值，则插值,单位S
+max_interpolation_time = 180
 # ===================船舶label和SOG阈值对应关系=====================
 max_sog = {
     '1012': 33,  # 客船
@@ -127,27 +129,49 @@ def process2(trajectories_process1):
     count1 = 0
     # 用于统计根据实际位置SOG超标数量
     count2 = 0
+    # 用于记录大于max_interpolation_time的插值数量
+    count3 = 0
     # 用于记录需要插值的时间点
+    # 用于返回处理后结果
+    trajectories_process2 = {}
     for key in trajectories_process1:
         timestamp = []
         trajectory = trajectories_process1[key]
         max_sog_now = max_sog[trajectory[0].VesselType]
         start_time = trajectory[0].BaseDateTime
+        # 找到插值的时间戳，从0开始
         for i in range(1, len(trajectory) - 1):
+            # 标注超速
             if trajectory[i].SOG > max_sog_now:
                 count1 += 1
                 timestamp.append((trajectory[i].BaseDateTime - start_time).total_seconds())
+            # 实际速度超速
             elif getDistance(trajectory[i], trajectory[i + 1]) / (
-                    trajectory[i + 1].BaseDateTime - trajectory[i].BaseDateTime).total_seconds() * 3600 > 1.852 * max_sog_now \
+                    trajectory[i + 1].BaseDateTime - trajectory[i].BaseDateTime).total_seconds() * 3600 \
+                    > 1.852 * max_sog_now \
                     or getDistance(trajectory[i - 1], trajectory[i]) / (
-                    trajectory[i].BaseDateTime - trajectory[i - 1].BaseDateTime).total_seconds() * 3600 > 1.852 * max_sog_now:
+                    trajectory[i].BaseDateTime - trajectory[i - 1].BaseDateTime).total_seconds() * 3600 > \
+                    1.852 * max_sog_now:
                 count2 += 1
                 timestamp.append((trajectory[i].BaseDateTime - start_time).total_seconds())
-        if len(timestamp)>0:
-            interpolation3(trajectory=trajectory, inter_time=timestamp)
-    print(f"经过process2之后,AIS点超速count1:{count1}个")
-    print(f"经过process2之后,AIS点异常count2:{count2}个")
-    return trajectories_process1
+            # 插值时间间隔
+            elif (trajectory[i].BaseDateTime - trajectory[i - 1].BaseDateTime).total_seconds() > max_interpolation_time:
+                temp = trajectory[i - 1].BaseDateTime + datetime.timedelta(seconds=max_interpolation_time)
+                while temp < trajectory[i].BaseDateTime:
+                    timestamp.append((temp - start_time).total_seconds())
+                    count3 += 1
+                    temp = temp + datetime.timedelta(seconds=max_interpolation_time)
+        i = len(trajectory) - 1
+        temp = trajectory[i - 1].BaseDateTime + datetime.timedelta(seconds=max_interpolation_time)
+        while temp < trajectory[i].BaseDateTime:
+            timestamp.append((temp - start_time).total_seconds())
+            count3 += 1
+            temp = temp + datetime.timedelta(seconds=max_interpolation_time)
+        if len(timestamp) > 0:
+            trajectory = interpolation3(trajectory=trajectory, inter_time=timestamp)
+        trajectories_process2[key] = trajectory
+    print(f"经过process2之后,AIS插值点count1:{count1}个，count2:{count2}个，count3:{count3}个")
+    return trajectories_process2
 
 
 # =========================================工具函数====================================

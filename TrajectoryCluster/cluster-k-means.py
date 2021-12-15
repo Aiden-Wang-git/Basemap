@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from TrajectoryCluster.dtw import DTW, DTWSpatialDis, DTWCompare, DTW1, DTWSpatialDisCOM
 import numpy as np
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, KMeans, AgglomerativeClustering
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score  # 计算 轮廓系数，CH 指标，DBI
 from TrajectoryCluster.myHausdorff import hausdorff
 # 如遇中文显示问题可加入以下代码
@@ -30,7 +30,6 @@ session = DbSession()
 # testAIS = session.query(AIS).filter(AIS.MMSI=='王军号MMSI').one()
 # print("type:",type(testAIS))
 # print("生日",testAIS.BaseDateTime)
-
 
 
 # ================================航迹提取=============================
@@ -156,44 +155,41 @@ traDistances += traDistances.T - np.diag(traDistances.diagonal())
 traDistancesSpa += traDistancesSpa.T - np.diag(traDistancesSpa.diagonal())
 print("计算DTW距离时比较次数：" + str(countNum))
 
-
-
 # =========================测试聚类时参数===================
 # res = []
-# for eps in np.arange(0.01, 1, 0.01):
-#     for min_samples in range(2, 10):
-#         dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
-#         label = dbscan.fit(np.array(traDistances)).labels_
-#         try:
-#             score = silhouette_score(np.array(traDistancesSpa), label, metric='precomputed')
-#         except ValueError:
-#             score = -1
-#         n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
-#         # print("聚类个数：", n_clusters)
-#         # 异常点的个数
-#         outLiners = np.sum(np.where(dbscan.labels_ == -1, 1, 0))
-#         # print("异常航迹个数：", outLiners)
-#         # 统计每个簇的样本个数
-#         stats = pd.Series([i for i in dbscan.labels_ if i != -1]).value_counts().values
+# for k in np.arange(2, 20, 1):
+#     kmeans_model = KMeans(n_clusters=k, random_state=1, precompute_distances='precomputed')
+#     label = kmeans_model.fit(np.array(traDistances)).labels_
+#     try:
+#         score = silhouette_score(np.array(traDistancesSpa), label, metric='precomputed')
+#     except ValueError:
 #         score = -1
-#         if stats.size > 2:
-#             traDistancesSC = []
-#             labelSC = []
-#             for i in range(len(label)):
-#                 line = []
-#                 if label[i] == -1:
-#                     continue
-#                 for j in range(len(label)):
-#                     if not label[i] == -1 and not label[j] == -1:
-#                         line.append(traDistances[i][j])
-#                 traDistancesSC.append(line)
-#             for i in range(len(label)):
-#                 if not label[i] == -1:
-#                     labelSC.append(label[i])
-#             score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
-#         res.append(
-#             {'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outLiners, 'stats': stats,
-#              'score': score})
+#     n_clusters = len([i for i in set(kmeans_model.labels_) if i != -1])
+#     # print("聚类个数：", n_clusters)
+#     # 异常点的个数
+#     outLiners = np.sum(np.where(kmeans_model.labels_ == -1, 1, 0))
+#     # print("异常航迹个数：", outLiners)
+#     # 统计每个簇的样本个数
+#     stats = pd.Series([i for i in kmeans_model.labels_ if i != -1]).value_counts().values
+#     score = -1
+#     if stats.size > 2:
+#         traDistancesSC = []
+#         labelSC = []
+#         for i in range(len(label)):
+#             line = []
+#             if label[i] == -1:
+#                 continue
+#             for j in range(len(label)):
+#                 if not label[i] == -1 and not label[j] == -1:
+#                     line.append(traDistances[i][j])
+#             traDistancesSC.append(line)
+#         for i in range(len(label)):
+#             if not label[i] == -1:
+#                 labelSC.append(label[i])
+#         score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
+#     res.append(
+#         {'k': k, 'n_clusters': n_clusters, 'outliners': outLiners, 'stats': stats,
+#          'score': score})
 # # 将迭代后的结果存储到数据框中
 # df = pd.DataFrame(res)
 
@@ -202,20 +198,24 @@ print("计算DTW距离时比较次数：" + str(countNum))
 # 豪斯多夫聚类参数
 # eps = 0.006
 # min_samples = 4
+# n_clusters=7
+
 # 混合距离对比试验参数
-eps = 0.16
-min_samples = 6
+# eps = 0.16
+# min_samples = 6
+# n_clusters=7
+
 # 真实实验参数
-# eps = 0.52
+# eps = 0.27
 # min_samples = 5
-dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
+n_clusters = 7
+
+dbscan = KMeans(n_clusters=n_clusters, random_state=1, precompute_distances='precomputed')
 label = dbscan.fit(np.array(traDistances)).labels_
 # 评价聚类的效果
 
 # =====================================程序结束时间==========================
 endTime = time.time()
-print("聚类用时",str(endTime-startTime))
-
 
 score = silhouette_score(np.array(traDistancesSpa), label, metric='precomputed')
 print("聚类效果SC得分：", score)
@@ -261,7 +261,6 @@ colors_dict = {-1: 'red', 0: 'green', 1: 'blue', 2: 'cyan', 3: 'purple', 4: 'mag
                7: 'r', 8: 'pink', 9: 'yellow'}
 fig = plt.figure()
 a1 = fig.add_subplot(111)
-# 用于记录不同label出先的先后顺序
 colorLegend = []
 colorIndex = 1
 a1 = fig.add_subplot(111)
@@ -309,7 +308,7 @@ plt.show()
 #     for trajectory in trajectories:
 #         dx = []
 #         dy = []
-#         colorLabel = colors_dict[aaa]
+#         colorLabel = colors_dict[trajectory.label]
 #         if aaa != trajectory.label:
 #             continue
 #         for point in trajectory.points:
@@ -327,7 +326,8 @@ plt.show()
 #     plt.title("label"+str(aaa+1))
 #     plt.savefig("cluster results"+str(aaa), dpi=1080, bbox_inches='tight')
 #     print("label"+str(aaa)+"绘图完成。。。。。")
-    # plt.show()
+#     # plt.show()
 
 
 print("结束！")
+print("共用时", str(endTime - startTime))

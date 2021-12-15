@@ -161,7 +161,8 @@ def DTW(s1, s2):
         p.insert(0, i)
         q.insert(0, j)
         count += 1
-    return D1[-1, -1] / count
+    # return D1[-1, -1] / count
+    return D1[-1, -1] / count * (1/(math.e**(-30*(10*spatialDsi-1))+1)+1)
 
 
 # DTW计算序列s1,s2的最小距离，对比试验

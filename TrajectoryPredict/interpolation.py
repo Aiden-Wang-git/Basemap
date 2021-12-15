@@ -1,11 +1,18 @@
+from pylab import mpl, datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.interpolate as spi
-
-
+import matplotlib.ticker as mtick
 # 进行三次样条拟合
 # 传入轨迹数据AIS的list，需要插值的时间戳
+from TrajectoryCluster.aisPoint import AIS
+
+
 def interpolation3(trajectory, inter_time):
+    MMSI = trajectory[0].MMSI
+    Length = trajectory[0].Length
+    Width = trajectory[0].Width
+    VesselType = trajectory[0].VesselType
     # 先统计原先轨迹时间戳，转换为从0开始的list
     time = []
     SOGs = []
@@ -31,7 +38,20 @@ def interpolation3(trajectory, inter_time):
     # =========插值SOG===========
     ipo3 = spi.splrep(time, LONs, k=3)  # 样本点导入，生成参数
     LON_3 = spi.splev(inter_time, ipo3)  # 根据观测点和样条参数，生成插值
-    draw_interpolation(SOG_3, COG_3, LAT_3, LON_3, SOGs, LATs, LONs, COGs, inter_time, time)
+    for i in range(len(SOG_3)):
+        trajectory.append(
+            AIS(ID='',
+                MMSI=MMSI,
+                BaseDateTime=start_time + datetime.timedelta(seconds=inter_time[i]),
+                LAT=LAT_3[i],
+                LON=LON_3[i],
+                SOG=SOG_3[i],
+                COG=COG_3[i],
+                Length=Length,
+                Width=Width,
+                VesselType=VesselType))
+    trajectory.sort(key=lambda point: point.BaseDateTime)
+    # draw_interpolation(SOG_3, COG_3, LAT_3, LON_3, SOGs, LATs, LONs, COGs, inter_time, time)
     return trajectory
 
 
@@ -40,11 +60,24 @@ plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 
 
 def draw_interpolation(SOG_3, COG_3, LAT_3, LON_3, SOGs, LATs, LONs, COGs, inter_time, time):
-    plt.plot(time, LATs, 'o', label='样本点')
-    plt.plot(inter_time, LAT_3, label='插值点')
+    # plt.ticklabel_format(axis="y", style='plain', scilimits=(0, 0))
+    plt.plot(time, LATs, 'o-')
+    plt.plot(time, LATs, 'go', label='样本点')
+    plt.plot(inter_time, LAT_3, 'ro', label='插值点')
     # plt.set_ylim(LATs.min() - 1, LATs.max() + 1)
     plt.ylabel('指数')
-    plt.title('三次样条插值')
+    plt.title('三次样条插值-LAT')
+    plt.legend()
+    plt.show()
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(time, LONs, 'o-')
+    ax.plot(time, LONs, 'go', label='样本点')
+    ax.plot(inter_time, LON_3, 'ro', label='插值点')
+    ax.yaxis.set_major_formatter(mtick.FormatStrFormatter('%.3f'))
+    # plt.set_ylim(LONs.min() - 1, LONs.max() + 1)
+    plt.ylabel('指数')
+    plt.title('三次样条插值-LON')
     plt.legend()
     plt.show()
 #
