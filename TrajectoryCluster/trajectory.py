@@ -79,7 +79,7 @@ class Trajectory:
                 index.append(i)
                 continue
             self.deleteCircleNum = self.deleteCircleNum + 1
-            print("发生相邻航迹点距离小于r的情况，删除该点")
+            # print("发生相邻航迹点距离小于r的情况，删除该点")
         index.append(self.count - 1)
         self.deleteNum +=self.deleteCircleNum
         # 用于保存删除点下标的左右边界
@@ -94,6 +94,10 @@ class Trajectory:
                 newPoints.append(self.points[i])
         self.points = newPoints
         self.count = len(self.points)
+
+    def set_points(self,points):
+        self.points = points
+        self.count = len(points)
 
     def __init__(self, MMSI, vesselType):
         self.MMSI = MMSI

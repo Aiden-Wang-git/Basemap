@@ -7,7 +7,7 @@ from TrajectoryCluster.trajectory import Trajectory
 import time
 import matplotlib.pyplot as plt
 import pandas as pd
-from TrajectoryCluster.dtw import DTW, DTWSpatialDis, DTWCompare, DTW1, DTWSpatialDisCOM
+from TrajectoryCluster.my_dtw import DTW, DTWSpatialDis, DTWCompare, DTW1, DTWSpatialDisCOM
 import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score  # 计算 轮廓系数，CH 指标，DBI
@@ -36,7 +36,7 @@ bottom = 33.55
 left = -118.30
 right = -118.20
 begin = '2017-01-01'
-end = '2018-01-01'
+end = '2017-02-01'
 
 # ===================航迹预处理的条件=============================
 # 一条航迹中至少包含AIS点数目
@@ -66,8 +66,11 @@ mpl.rcParams['axes.unicode_minus'] = False  # 解决保存图像是负号'-'显�
 
 
 # ==========================================原始航迹提取===============================
+
 # 返回的结果是个字典，key为MMSI，value为按时间排序的AIS点
 def getRawTrajectory(top, bottom, left, right, begin, end):
+    time1 = datetime.datetime.now()
+    print(f"数据库查询范围：({left},{right}),({top},{bottom}),时间范围：{begin}~{end}")
     # 连接数据库
     engine = create_engine("mysql+pymysql://root:123456@localhost:3306/ais?charset=utf8")
     DbSession = sessionmaker(bind=engine)
@@ -87,20 +90,23 @@ def getRawTrajectory(top, bottom, left, right, begin, end):
     trajectories = {}
     for data in datas:
         if trajectories.__contains__(data.MMSI):
-            trajectories[data.MMSI].append(data)
+            trajectories[data.MMSI].add_point(data)
         else:
-            trajectories[data.MMSI] = [data]
+            trajectory = Trajectory(data.MMSI, data.VesselType)
+            trajectories[data.MMSI] = trajectory
+    time2 = datetime.datetime.now()
+    print(f"从数据库中提取数据共用时：{time2 - time1}")
     print(f"从数据库中提取轨迹，共有不同类别MMSI:{len(trajectories)}个，AIS点：{len(datas)}个")
     return trajectories
 
 
-# ==========================================对原始航迹进行分段及删除短航迹================
+# ========================================第一章：对原始航迹进行分段及删除短航迹================
 # 删除AIS点数目小于35个的短航迹，对相邻间隔大于30min的航迹分段
 def process1(trajectories):
     trajectories_process1 = {}
     count = 0
     for key in trajectories:
-        trajectory = trajectories[key]
+        trajectory = trajectories[key].points
         split_time = [0]
         # 原航迹太短，直接删除
         if len(trajectory) < min_num_in_trajectory:
@@ -119,7 +125,7 @@ def process1(trajectories):
             else:
                 trajectories_process1[key] = trajectory
                 count += len(trajectories_process1[key])
-    print(f"经过process1之后，共有航迹：{len(trajectories_process1)}条,AIS点：{count}个")
+    print(f"经过process1,轨迹分割之后，共有航迹：{len(trajectories_process1)}条,AIS点：{count}个")
     return trajectories_process1
 
 
@@ -134,6 +140,8 @@ def process2(trajectories_process1):
     # 用于记录需要插值的时间点
     # 用于返回处理后结果
     trajectories_process2 = {}
+    # 统计AIS点总数
+    count = 0
     for key in trajectories_process1:
         timestamp = []
         trajectory = trajectories_process1[key]
@@ -170,11 +178,46 @@ def process2(trajectories_process1):
         if len(timestamp) > 0:
             trajectory = interpolation3(trajectory=trajectory, inter_time=timestamp)
         trajectories_process2[key] = trajectory
-    print(f"经过process2之后,AIS插值点count1:{count1}个，count2:{count2}个，count3:{count3}个")
-    return trajectories_process2
+        count += len(trajectory)
+    print(f"process2时,AIS插值点count1:{count1}个，count2:{count2}个，count3:{count3}个")
+    print(f"process2异常点剔除及插值之后,共有航迹：{len(trajectories_process2)}条,AIS点：{count}个")
+    for key in trajectories_process2:
+        trajectory = Trajectory(trajectories_process2[key][0].MMSI,trajectories_process2[key][0].VesselType)
+        trajectory.set_points(trajectories_process2[key])
+        trajectories_process2[key] = trajectory
+    return trajectories_process2, count
+
+
+# ========================================第二章：对原始航迹进行分段及删除短航迹================
+
+# 改进后D-P压缩
+def trajectory_compress(trajectories, count):
+    trajectories_process3 = trajectories
+    compressError = []
+    for key in trajectories_process3:
+        trajectory = trajectories_process3[key]
+        trajectory.compress(trajectory.points[0], trajectory.points[trajectory.count - 1])
+        # D-P压缩改进具体步骤
+        trajectory.deleteCircle()
+        compressError.append(trajectory.error / trajectory.deleteNum)
+    print("压缩平均误差：", sum(compressError) / len(compressError))
+    df = pd.DataFrame(compressError)
+    df.plot.box(title="Compress Error")
+    plt.grid(linestyle="--", alpha=0.1)
+    plt.xlabel('经度/°')
+    plt.ylabel('纬度/°')
+    plt.show()
+    # 航迹压缩后共存在AIS点个数
+    aisNumAfter = 0
+    for key in trajectories_process3:
+        aisNumAfter += len(trajectories_process3[key].points)
+    print("压缩后共有AIS点：", aisNumAfter)
+    print("压缩率为：", 1 - aisNumAfter / count)
+    return trajectories_process3
 
 
 # =========================================工具函数====================================
+
 # 1.根据两个AIS点，计算两者之间的实际距离
 def getDistance(pointA, pointB):
     # 这个方法太慢
@@ -220,12 +263,42 @@ def define_models(n_input, n_output, n_units):
     return model, encoder_model, decoder_model
 
 
+# ===============================航迹展示===================================
+def drawTrajectory(title, trajectories):
+    fig = plt.figure()
+    a1 = fig.add_subplot(111)
+    for key in trajectories:
+        trajectory = trajectories[key]
+        dx = []
+        dy = []
+        for i in range(trajectory.getLength()):
+            dx.append(trajectory.points[i].LON)
+            dy.append(trajectory.points[i].LAT)
+        dx = np.array(dx)
+        dy = np.array(dy)
+        a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
+                  color='r', linestyle='-', width=0.003)
+    plt.xlabel('经度/°')
+    plt.ylabel('纬度/°')
+    # plt.title(title)
+    plt.savefig(title, dpi=1080, bbox_inches='tight')
+    plt.show()
+
+
 # ==================================主函数部分==========================================
 
 # =============================第一章：航迹数据的预处理===================================
+print("========================第一章：航迹数据的预处理================================")
 trajectories = getRawTrajectory(top=top, bottom=bottom, left=left, right=right, begin=begin, end=end)
 trajectories_process1 = process1(trajectories=trajectories)
-trajectories_process2 = process2(trajectories_process1=trajectories_process1)
+trajectories_process2, count = process2(trajectories_process1=trajectories_process1)
+drawTrajectory("第一章提取到的航迹数据", trajectories_process2)
+# =============================第二章：航迹的压缩===================================
+print("========================第二章：航迹的压缩================================")
+# 首先把元数据复制一份，用于训练模型
+trajectories_process2_copy = list(trajectories_process2)
+trajectories_process3 = trajectory_compress(trajectories=trajectories_process2, count=count)
+drawTrajectory("第二章压缩后的航迹数据", trajectories_process3)
 
 # =============================第四章：seq2seq预测=======================================
 data_to_seq2seq(trajectories_process2)

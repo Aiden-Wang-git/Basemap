@@ -7,7 +7,7 @@ from TrajectoryCluster.trajectory import Trajectory
 import time
 import matplotlib.pyplot as plt
 import pandas as pd
-from TrajectoryCluster.dtw import DTW, DTWSpatialDis, DTWCompare, DTW1, DTWSpatialDisCOM
+from TrajectoryCluster.my_dtw import DTW, DTWSpatialDis, DTWCompare, DTW1, DTWSpatialDisCOM
 import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score  # 计算 轮廓系数，CH 指标，DBI
