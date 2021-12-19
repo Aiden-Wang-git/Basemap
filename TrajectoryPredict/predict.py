@@ -27,6 +27,7 @@ from keras.models import Model
 from keras.layers import Input
 from keras.layers import LSTM
 from keras.layers import Dense
+import copy
 
 # ========================全文种使用到的参数==============================
 
@@ -440,8 +441,8 @@ def cluster_result(tra_distances_SC, trajectories_process3, label, trajectories_
     # 给航迹打上类别标签
     i = 0
     for key in trajectories_process3:
-        trajectories_process3[key].labels = label[i]
-        trajectories_process2_copy[key].labels = label[i]
+        trajectories_process3[key].label = label[i]
+        trajectories_process2_copy[key].label = label[i]
         i += 1
     return n_clusters
 
@@ -529,12 +530,12 @@ def draw_cluster_result(trajectories_process3):
     a1.set_ylim(top=33.65)
     a1.set_xlim(left=-118.30)
     a1.set_xlim(right=-118.20)
-    trajectories.sort(key=lambda trajectory: trajectory.labels)
+    trajectories.sort(key=lambda trajectory: trajectory.label)
     for trajectory in trajectories:
         dx = []
         dy = []
-        colorLabel = colors_dict[trajectory.labels]
-        if -1 == trajectory.labels:
+        colorLabel = colors_dict[trajectory.label]
+        if -1 == trajectory.label:
             continue
         for point in trajectory.points:
             dx.append(point.LON)
@@ -542,7 +543,7 @@ def draw_cluster_result(trajectories_process3):
         dx = np.array(dx)
         dy = np.array(dy)
         a1.plot(dx, dy, color=colorLabel, linestyle='-')
-        if colorLegend.__contains__(trajectory.labels):
+        if colorLegend.__contains__(trajectory.label):
             a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
                       color=colorLabel, linestyle='-', width=0.003)
         else:
@@ -550,7 +551,7 @@ def draw_cluster_result(trajectories_process3):
                       color=colorLabel, linestyle='-', width=0.003, label="label" + str(colorIndex))
             colorIndex = colorIndex + 1
             plt.legend(loc=4)
-            colorLegend.append(trajectory.labels)
+            colorLegend.append(trajectory.label)
         plt.plot()
     plt.xlabel('经度/°')
     plt.ylabel('纬度/°')
@@ -570,7 +571,7 @@ drawTrajectory("第一章提取到的航迹数据", trajectories_process2)
 # =============================第二章：航迹的压缩===================================
 print("========================第二章：航迹的压缩================================")
 # 首先把原数据复制一份，用于训练模型
-trajectories_process2_copy = trajectories_process2.copy()
+trajectories_process2_copy = copy.deepcopy(trajectories_process2)
 trajectories_process3 = trajectory_compress(trajectories=trajectories_process2, count=count)
 drawTrajectory("第二章压缩后的航迹数据", trajectories_process3)
 # =============================第三章：航迹的聚类===================================
@@ -596,12 +597,12 @@ cluster_num = cluster_result(tra_distances_SC=tra_distances_SC, trajectories_pro
 draw_cluster_result(trajectories_process3=trajectories_process3)
 # =============================第四章：seq2seq预测=======================================
 print("============================第四章：seq2seq预测======================================")
-for label in range(1, cluster_num + 1):
+for label in range(0, cluster_num):
     trajectories_seq2seq = {}
     for key in trajectories_process2_copy:
         if trajectories_process2_copy[key].label == label:
-            trajectories_seq2seq.update(trajectories_process2_copy[key])
-    data_to_seq2seq(trajectories_process2)
+            trajectories_seq2seq[key] = trajectories_process2_copy[key].points
+    data_to_seq2seq(trajectories_seq2seq)
     print(f"label{label}模型训练完成")
 
 # 训练模型
