@@ -268,7 +268,7 @@ a1.set_ylim(bottom=33.55)
 a1.set_ylim(top=33.65)
 a1.set_xlim(left=-118.30)
 a1.set_xlim(right=-118.20)
-trajectories.sort(key=lambda trajectory: trajectory.label)
+trajectories.sort(key=lambda trajectory: trajectory.labels)
 for trajectory in trajectories:
     dx = []
     dy = []

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from TrajectoryCluster.my_dtw import DTW, DTWSpatialDis, DTWCompare, DTW1, DTWSpatialDisCOM
 import numpy as np
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, KMeans, AgglomerativeClustering
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score  # 计算 轮廓系数，CH 指标，DBI
 from TrajectoryCluster.myHausdorff import hausdorff
 from pylab import mpl, datetime
@@ -57,12 +57,27 @@ max_sog = {
     '1001': 19,  # 渔船
     '1019': 30,  # 游船
     '31': 9,  # 拖船（此类拖船航迹数目较少，整个数据库才14K条数据，可以考虑删除或者和1025合并）
-
 }
+# ================DBSCAN聚类时参数===================================
+# 豪斯多夫聚类参数
+# eps = 0.006
+# min_samples = 4
+# 混合距离对比试验参数
+# eps = 0.16
+# min_samples = 6
+# 真实实验参数
+eps = 0.48
+min_samples = 5
+# =============================K-means聚类、凝聚聚类参数===============
+# n_clusters = 3
+
 
 # ====================画图时，如遇中文显示问题可加入以下代码============
 mpl.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体
 mpl.rcParams['axes.unicode_minus'] = False  # 解决保存图像是负号'-'显示为方块的问题
+# ===========================聚类效果绘图，不同颜色==========================
+colors_dict = {-1: 'red', 0: 'green', 1: 'blue', 2: 'cyan', 3: 'purple', 4: 'magenta', 5: 'darksalmon', 6: 'gray',
+               7: 'r', 8: 'pink', 9: 'yellow'}
 
 
 # ==========================================原始航迹提取===============================
@@ -182,7 +197,7 @@ def process2(trajectories_process1):
     print(f"process2时,AIS插值点count1:{count1}个，count2:{count2}个，count3:{count3}个")
     print(f"process2异常点剔除及插值之后,共有航迹：{len(trajectories_process2)}条,AIS点：{count}个")
     for key in trajectories_process2:
-        trajectory = Trajectory(trajectories_process2[key][0].MMSI,trajectories_process2[key][0].VesselType)
+        trajectory = Trajectory(trajectories_process2[key][0].MMSI, trajectories_process2[key][0].VesselType)
         trajectory.set_points(trajectories_process2[key])
         trajectories_process2[key] = trajectory
     return trajectories_process2, count
@@ -216,6 +231,221 @@ def trajectory_compress(trajectories, count):
     return trajectories_process3
 
 
+# ========================================第三章：对航迹完成聚类================
+# 1.计算航迹之间的度量距离
+def get_DBLD(trajectories_process3):
+    trajectories = []
+    for key in trajectories_process3:
+        trajectories.append(trajectories_process3[key])
+    # 保存航迹距离
+    tra_distances_cluster = []
+    # 保存位置距离
+    tra_distances_SC = []
+    # 统计计算次数
+    countNum = 0
+    time1 = datetime.datetime.now()
+    for i in range(len(trajectories)):
+        traDistance = []
+        traDistanceSpa = []
+        for k in range(i + 1):
+            traDistance.append(0)
+            traDistanceSpa.append(0)
+        for j in range(i + 1, len(trajectories)):
+            # 本文实验
+            traDistance.append(DTW(trajectories[i].points, trajectories[j].points))
+            # 混合距离实验
+            # traDistance.append(DTWSpatialDisCOM(trajectories[i].points, trajectories[j].points))
+            # 豪斯多夫距离对比试验
+            # traDistance.append(hausdorff(trajectories[i].points, trajectories[j].points))
+            # 计算SC得分需要的度量距离
+            traDistanceSpa.append(DTWSpatialDis(trajectories[i].points, trajectories[j].points))
+            countNum = countNum + len(trajectories[i].points) * len(trajectories[j].points)
+        tra_distances_cluster.append(traDistance)
+        tra_distances_SC.append(traDistanceSpa)
+    tra_distances_cluster = np.triu(np.array(tra_distances_cluster))
+    tra_distances_SC = np.triu(np.array(tra_distances_SC))
+    tra_distances_cluster += tra_distances_cluster.T - np.diag(tra_distances_cluster.diagonal())
+    tra_distances_SC += tra_distances_SC.T - np.diag(tra_distances_SC.diagonal())
+    time2 = datetime.datetime.now()
+    print(f"计算航迹间度量距离时比较次数：{countNum},用时：{time2 - time1}")
+    return tra_distances_cluster, tra_distances_SC
+
+
+# 2.尝试聚类算法的参数
+# 凝聚聚类尝试不同参数
+def get_agg_cluster_parameters(tra_distances_cluster, tra_distances_SC):
+    res = []
+    time1 = datetime.datetime.now()
+    for k in np.arange(2, 20, 1):
+        agg_model = AgglomerativeClustering(n_clusters=k, affinity='precomputed', linkage='average')
+        label = agg_model.fit(np.array(tra_distances_cluster)).labels_
+        try:
+            score = silhouette_score(np.array(tra_distances_SC), label, metric='precomputed')
+        except ValueError:
+            score = -1
+        n_clusters = len([i for i in set(agg_model.labels_) if i != -1])
+        # print("聚类个数：", n_clusters)
+        # 异常点的个数
+        outLiners = np.sum(np.where(agg_model.labels_ == -1, 1, 0))
+        # print("异常航迹个数：", outLiners)
+        # 统计每个簇的样本个数
+        stats = pd.Series([i for i in agg_model.labels_ if i != -1]).value_counts().values
+        score = -1
+        if stats.size > 2:
+            traDistancesSC = []
+            labelSC = []
+            for i in range(len(label)):
+                line = []
+                if label[i] == -1:
+                    continue
+                for j in range(len(label)):
+                    if not label[i] == -1 and not label[j] == -1:
+                        line.append(tra_distances_cluster[i][j])
+                traDistancesSC.append(line)
+            for i in range(len(label)):
+                if not label[i] == -1:
+                    labelSC.append(label[i])
+            score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
+        res.append(
+            {'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outLiners,
+             'stats': stats,
+             'score': score})
+    time2 = datetime.datetime.now()
+    print(f"获取聚类参数用时：{time2 - time1}")
+    # 将迭代后的结果存储到数据框中
+    df = pd.DataFrame(res)
+    return df.sort_values(by=['score'], ascending=False)
+
+
+# K-means聚类尝试获取参数
+def get_Kmeans_cluster_parameters(tra_distances_cluster, tra_distances_SC):
+    res = []
+    time1 = datetime.datetime.now()
+    for k in np.arange(2, 20, 1):
+        kmeans_model = KMeans(n_clusters=k, random_state=1, precompute_distances='precomputed')
+        label = kmeans_model.fit(np.array(tra_distances_cluster)).labels_
+        try:
+            score = silhouette_score(np.array(tra_distances_SC), label, metric='precomputed')
+        except ValueError:
+            score = -1
+        n_clusters = len([i for i in set(kmeans_model.labels_) if i != -1])
+        # print("聚类个数：", n_clusters)
+        # 异常点的个数
+        outLiners = np.sum(np.where(kmeans_model.labels_ == -1, 1, 0))
+        # print("异常航迹个数：", outLiners)
+        # 统计每个簇的样本个数
+        stats = pd.Series([i for i in kmeans_model.labels_ if i != -1]).value_counts().values
+        score = -1
+        if stats.size > 2:
+            traDistancesSC = []
+            labelSC = []
+            for i in range(len(label)):
+                line = []
+                if label[i] == -1:
+                    continue
+                for j in range(len(label)):
+                    if not label[i] == -1 and not label[j] == -1:
+                        line.append(tra_distances_cluster[i][j])
+                traDistancesSC.append(line)
+            for i in range(len(label)):
+                if not label[i] == -1:
+                    labelSC.append(label[i])
+            score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
+        res.append(
+            {'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outLiners,
+             'stats': stats,
+             'score': score})
+    time2 = datetime.datetime.now()
+    print(f"获取聚类参数用时：{time2 - time1}")
+    # 将迭代后的结果存储到数据框中
+    df = pd.DataFrame(res)
+    return df.sort_values(by=['score'], ascending=False)
+
+
+# DBSCAN尝试聚类算法的参数
+def get_DBSCAN_cluster_parameters(tra_distances_cluster, tra_distances_SC):
+    res = []
+    time1 = datetime.datetime.now()
+    for eps in np.arange(0.01, 1, 0.01):
+        for min_samples in range(2, 10):
+            dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
+            label = dbscan.fit(np.array(tra_distances_cluster)).labels_
+            try:
+                score = silhouette_score(np.array(tra_distances_SC), label, metric='precomputed')
+            except ValueError:
+                score = -1
+            n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
+            # print("聚类个数：", n_clusters)
+            # 异常点的个数
+            outLiners = np.sum(np.where(dbscan.labels_ == -1, 1, 0))
+            # print("异常航迹个数：", outLiners)
+            # 统计每个簇的样本个数
+            stats = pd.Series([i for i in dbscan.labels_ if i != -1]).value_counts().values
+            score = -1
+            if stats.size > 2:
+                traDistancesSC = []
+                labelSC = []
+                for i in range(len(label)):
+                    line = []
+                    if label[i] == -1:
+                        continue
+                    for j in range(len(label)):
+                        if not label[i] == -1 and not label[j] == -1:
+                            line.append(tra_distances_cluster[i][j])
+                    traDistancesSC.append(line)
+                for i in range(len(label)):
+                    if not label[i] == -1:
+                        labelSC.append(label[i])
+                score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
+            res.append(
+                {'eps': eps, 'min_samples': min_samples, 'n_clusters': n_clusters, 'outliners': outLiners,
+                 'stats': stats,
+                 'score': score})
+    time2 = datetime.datetime.now()
+    print(f"获取聚类参数用时：{time2 - time1}")
+    # 将迭代后的结果存储到数据框中
+    df = pd.DataFrame(res)
+    return df.sort_values(by=['score'], ascending=False)
+
+
+# 3.聚类结果统计
+def cluster_result(tra_distances_SC, trajectories_process3, label, trajectories_process2_copy):
+    score = silhouette_score(np.array(tra_distances_SC), label, metric='precomputed')
+    print("聚类效果SC得分：", score)
+    # 去除异常样本的SC得分
+    traDistancesSC = []
+    labelSC = []
+    for i in range(len(label)):
+        line = []
+        if label[i] == -1:
+            continue
+        for j in range(len(label)):
+            if not label[i] == -1 and not label[j] == -1:
+                line.append(tra_distances_SC[i][j])
+        traDistancesSC.append(line)
+    for i in range(len(label)):
+        if not label[i] == -1:
+            labelSC.append(label[i])
+    score = silhouette_score(np.array(traDistancesSC), labelSC, metric='precomputed')
+    print("去除异常样本聚类效果SC得分：", score)
+    n_clusters = len([i for i in set(dbscan.labels_) if i != -1])
+    print("聚类个数：", n_clusters)
+    # 异常点的个数
+    outLiners = np.sum(np.where(dbscan.labels_ == -1, 1, 0))
+    print("异常航迹个数：", outLiners)
+    # 统计每个簇的样本个数
+    stats = pd.Series([i for i in dbscan.labels_ if i != -1]).value_counts().values
+    for i in range(len(stats)):
+        print("类别", i, "共有航迹数量：", stats[i])
+    # 给航迹打上类别标签
+    i = 0
+    for key in trajectories_process3:
+        trajectories_process3[key].labels = label[i]
+        trajectories_process2_copy[key].labels = label[i]
+        i += 1
+    return n_clusters
+
+
 # =========================================工具函数====================================
 
 # 1.根据两个AIS点，计算两者之间的实际距离
@@ -235,7 +465,7 @@ def getDistance(pointA, pointB):
     return distance
 
 
-# 构造Seq2Seq训练模型model, 以及进行新序列预测时需要的的Encoder模型:encoder_model 与Decoder模型:decoder_model
+# 2.构造Seq2Seq训练模型model, 以及进行新序列预测时需要的的Encoder模型:encoder_model 与Decoder模型:decoder_model
 def define_models(n_input, n_output, n_units):
     # 训练模型中的encoder
     encoder_inputs = Input(shape=(None, n_input))
@@ -263,7 +493,7 @@ def define_models(n_input, n_output, n_units):
     return model, encoder_model, decoder_model
 
 
-# ===============================航迹展示===================================
+# 3.航迹展示
 def drawTrajectory(title, trajectories):
     fig = plt.figure()
     a1 = fig.add_subplot(111)
@@ -285,6 +515,50 @@ def drawTrajectory(title, trajectories):
     plt.show()
 
 
+# 4.聚类结果绘图展示
+def draw_cluster_result(trajectories_process3):
+    trajectories = []
+    for key in trajectories_process3:
+        trajectories.append(trajectories_process3[key])
+    fig = plt.figure()
+    a1 = fig.add_subplot(111)
+    colorLegend = []
+    colorIndex = 1
+    a1 = fig.add_subplot(111)
+    a1.set_ylim(bottom=33.55)
+    a1.set_ylim(top=33.65)
+    a1.set_xlim(left=-118.30)
+    a1.set_xlim(right=-118.20)
+    trajectories.sort(key=lambda trajectory: trajectory.labels)
+    for trajectory in trajectories:
+        dx = []
+        dy = []
+        colorLabel = colors_dict[trajectory.labels]
+        if -1 == trajectory.labels:
+            continue
+        for point in trajectory.points:
+            dx.append(point.LON)
+            dy.append(point.LAT)
+        dx = np.array(dx)
+        dy = np.array(dy)
+        a1.plot(dx, dy, color=colorLabel, linestyle='-')
+        if colorLegend.__contains__(trajectory.labels):
+            a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
+                      color=colorLabel, linestyle='-', width=0.003)
+        else:
+            a1.quiver(dx[:-1], dy[:-1], dx[1:] - dx[:-1], dy[1:] - dy[:-1], scale_units='xy', angles='xy', scale=1,
+                      color=colorLabel, linestyle='-', width=0.003, label="label" + str(colorIndex))
+            colorIndex = colorIndex + 1
+            plt.legend(loc=4)
+            colorLegend.append(trajectory.labels)
+        plt.plot()
+    plt.xlabel('经度/°')
+    plt.ylabel('纬度/°')
+    # plt.title("label")
+    plt.savefig("cluster results", dpi=1080, bbox_inches='tight')
+    plt.show()
+
+
 # ==================================主函数部分==========================================
 
 # =============================第一章：航迹数据的预处理===================================
@@ -295,21 +569,49 @@ trajectories_process2, count = process2(trajectories_process1=trajectories_proce
 drawTrajectory("第一章提取到的航迹数据", trajectories_process2)
 # =============================第二章：航迹的压缩===================================
 print("========================第二章：航迹的压缩================================")
-# 首先把元数据复制一份，用于训练模型
-trajectories_process2_copy = list(trajectories_process2)
+# 首先把原数据复制一份，用于训练模型
+trajectories_process2_copy = trajectories_process2.copy()
 trajectories_process3 = trajectory_compress(trajectories=trajectories_process2, count=count)
 drawTrajectory("第二章压缩后的航迹数据", trajectories_process3)
-
+# =============================第三章：航迹的聚类===================================
+print("========================第三章：航迹的聚类================================")
+tra_distances_cluster, tra_distances_SC = get_DBLD(trajectories_process3=trajectories_process3)
+# ========DBSCAN聚类=============
+print(f"这是DBSCAN聚类,eps={eps},min_samples={min_samples}")
+# df = get_DBSCAN_cluster_parameters(tra_distances_cluster=tra_distances_cluster, tra_distances_SC=tra_distances_SC)
+dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
+labels = dbscan.fit(np.array(tra_distances_cluster)).labels_
+# ===========Agg聚类=============
+# print(f"这是Agg聚类,n_clusters={n_clusters}")
+# df = get_agg_cluster_parameters(tra_distances_cluster=tra_distances_cluster, tra_distances_SC=tra_distances_SC)
+# agg_model = AgglomerativeClustering(n_clusters=n_clusters, affinity='precomputed', linkage='average')
+# label = agg_model.fit(np.array(tra_distances_cluster)).labels_
+# K-means聚类
+# print(f"这是K-means聚类,n_clusters={n_clusters}")
+# df = get_Kmeans_cluster_parameters(tra_distances_cluster=tra_distances_cluster, tra_distances_SC=tra_distances_SC)
+# kmeans_model = KMeans(n_clusters=n_clusters, random_state=1, precompute_distances='precomputed')
+# label = kmeans_model.fit(np.array(tra_distances_cluster)).labels_
+cluster_num = cluster_result(tra_distances_SC=tra_distances_SC, trajectories_process3=trajectories_process3,
+                             label=labels, trajectories_process2_copy=trajectories_process2_copy)
+draw_cluster_result(trajectories_process3=trajectories_process3)
 # =============================第四章：seq2seq预测=======================================
-data_to_seq2seq(trajectories_process2)
+print("============================第四章：seq2seq预测======================================")
+for label in range(1, cluster_num + 1):
+    trajectories_seq2seq = {}
+    for key in trajectories_process2_copy:
+        if trajectories_process2_copy[key].label == label:
+            trajectories_seq2seq.update(trajectories_process2_copy[key])
+    data_to_seq2seq(trajectories_process2)
+    print(f"label{label}模型训练完成")
+
 # 训练模型
 # train_seq2seq_model()
 # 预测用例船舶MMSI
-test1 = '367580930-24'
-test2 = '367724740-0'
-test3 = '367719640-4'
-test4 = '367719640-31'
-model_predict(trajectories_process2[test1])
-model_predict(trajectories_process2[test2])
-model_predict(trajectories_process2[test3])
-model_predict(trajectories_process2[test4])
+# test1 = '367580930-24'
+# test2 = '367724740-0'
+# test3 = '367719640-4'
+# test4 = '367719640-31'
+# model_predict(trajectories_process2[test1])
+# model_predict(trajectories_process2[test2])
+# model_predict(trajectories_process2[test3])
+# model_predict(trajectories_process2[test4])
