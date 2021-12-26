@@ -62,7 +62,6 @@ def DTWSpatialDis(s1, s2):
         for j in range(c):
             D1[i, j] = distance(s1[i], s2[j])
     # 生成原始距离矩阵
-    M = D1.copy()
     for i in range(r):
         for j in range(c):
             D1[i, j] += min(D0[i, j], D0[i, j + 1], D0[i + 1, j])
@@ -139,7 +138,6 @@ def DTW(s1, s2):
         for j in range(c):
             D1[i, j] = angle(s1[i:i + 2], s2[j:j + 2])
     # 生成原始距离矩阵
-    M = D1.copy()
     for i in range(r):
         for j in range(c):
             D1[i, j] += min(D0[i, j], D0[i, j + 1], D0[i + 1, j])
