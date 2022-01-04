@@ -638,29 +638,30 @@ print("========================第一章：航迹数据的预处理=============
 # trajectories = getRawTrajectory(top=top, bottom=bottom, left=left, right=right, begin=begin, end=end)
 # trajectories_process1 = process1(trajectories=trajectories)
 # process2(trajectories_process1=trajectories_process1)
-count = int(np.load('AIS_num_before_compress.npy'))
-trajectories_process2 = np.load('trajectories_process2.npy').item()
+count = int(np.load('AIS_num_before_compress.npy',allow_pickle=True))
+trajectories_process2 = np.load('trajectories_process2.npy',allow_pickle=True).item()
 # drawTrajectory("第一章提取到的航迹数据", trajectories_process2)
 
 # =============================第二章：航迹的压缩===================================
 print("========================第二章：航迹的压缩================================")
 # 首先把原数据复制一份，用于训练模型
-trajectories_process2_copy = np.load('trajectories_process2.npy').item()
+trajectories_process2_copy = np.load('trajectories_process2.npy',allow_pickle=True).item()
 # trajectory_compress(trajectories=trajectories_process2, count=count)
-trajectories_process3 = np.load('trajectories_process3_myDP.npy').item()
+trajectories_process3 = np.load('trajectories_process3_myDP.npy',allow_pickle=True).item()
 drawTrajectory("第二章压缩后的航迹数据", trajectories_process3)
 
 # =============================第三章：航迹的聚类===================================
 print("========================第三章：航迹的聚类================================")
 # get_DBLD(trajectories_process3=trajectories_process3)
-tra_distances_cluster = np.load("tra_distances_cluster.npy")
-tra_distances_SC = np.load("tra_distances_SC.npy")
+tra_distances_cluster = np.load("tra_distances_cluster.npy",allow_pickle=True)
+tra_distances_SC = np.load("tra_distances_SC.npy",allow_pickle=True)
 # ========DBSCAN聚类=============
 print(f"这是DBSCAN聚类,eps={eps},min_samples={min_samples}")
 # get_DBSCAN_cluster_parameters(tra_distances_cluster=tra_distances_cluster, tra_distances_SC=tra_distances_SC)
 # df = np.load('df_DP.npy')
 dbscan = DBSCAN(min_samples=min_samples, eps=eps, leaf_size=1000, metric='precomputed')
 labels = dbscan.fit(np.array(tra_distances_cluster)).labels_
+np.save("labels",labels)
 # ===========Agg聚类=============
 # print(f"这是Agg聚类,n_clusters={n_clusters}")
 # df = get_agg_cluster_parameters(tra_distances_cluster=tra_distances_cluster, tra_distances_SC=tra_distances_SC)

@@ -5,7 +5,7 @@ import math
 from matplotlib import pyplot as plt
 import os
 import copy
-from tensorflow.contrib import rnn
+from tensorflow.python.ops import rnn
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.framework import dtypes
 from sklearn import preprocessing
